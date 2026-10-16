@@ -12,6 +12,13 @@ from .growth_detection import analyze_image
 log = logging.getLogger(__name__)
 
 
+def wait_for_next_cycle(stop, seconds):
+    for _ in range(seconds):
+        if stop.wait(1) or not monitoring_state()["active"]:
+            return False
+    return True
+
+
 def sensor_loop(stop):
     while not stop.is_set():
         if not monitoring_state()["active"]:
@@ -25,7 +32,7 @@ def sensor_loop(stop):
             log.warning("Lectura Shelly fallida: %s", exc)
             if monitoring_state()["active"]:
                 add_reading(None, None, type(exc).__name__)
-        stop.wait(settings.sensor_interval_seconds)
+        wait_for_next_cycle(stop, settings.sensor_interval_seconds)
 
 
 def photo_loop(stop):
@@ -53,7 +60,7 @@ def photo_loop(stop):
             log.warning("Captura de càmera fallida: %s", exc)
             if monitoring_state()["active"]:
                 add_photo("", type(exc).__name__)
-        stop.wait(settings.photo_interval_seconds)
+        wait_for_next_cycle(stop, settings.photo_interval_seconds)
 
 
 def start_workers():
