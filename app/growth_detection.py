@@ -7,6 +7,9 @@ unavailable instead of manufacturing a measurement.
 
 import json
 DEFAULT_ROI = {"x0": 0.36, "y0": 0.32, "x1": 0.58, "y1": 0.95}
+DETECTOR_VERSION = 2
+INITIAL_MAX_HEIGHT_RATIO = 0.55
+TRACKING_TOLERANCE = 0.18
 
 
 def _otsu_threshold(histogram):
@@ -45,8 +48,8 @@ def _smooth(values, radius=2):
     return result
 
 
-def estimate_surface(bright_fractions):
-    """Find a sustained dark-to-bright transition; return ratio and confidence."""
+def estimate_surface(bright_fractions, previous_ratio=None):
+    """Find a plausible, sustained dark-to-bright transition in the jar."""
     count = len(bright_fractions)
     smoothed = _smooth(bright_fractions)
     if count < 32:
@@ -54,30 +57,41 @@ def estimate_surface(bright_fractions):
 
     best = None
     for row in range(14, count - 14):
+        height_ratio = (count - row) / count
+        if previous_ratio is None:
+            # A shelf or reflection above the starter can look like a surface.
+            # The first frame should be plausible for a starter resting at the
+            # bottom of the jar; later frames follow the previous measurement.
+            if height_ratio > INITIAL_MAX_HEIGHT_RATIO:
+                continue
+        elif abs(height_ratio - previous_ratio) > TRACKING_TOLERANCE:
+            continue
         above = sum(smoothed[row - 14:row - 3]) / 11
         below = sum(smoothed[row + 3:row + 14]) / 11
         contrast = below - above
         if below < 0.55 or above > 0.62 or contrast < 0.18:
             continue
         confidence = max(0.0, min(1.0, contrast * 2.2))
-        # Prefer the strongest transition, then the higher boundary on ties.
-        candidate = (contrast, -row, row, confidence, above, below)
+        # Follow the nearest plausible surface across frames. For the first
+        # frame, keep the strongest transition in the lower part of the jar.
+        continuity = -abs(height_ratio - previous_ratio) if previous_ratio is not None else 0
+        candidate = (continuity, contrast, -row, row, confidence, above, below)
         if best is None or candidate[:2] > best[:2]:
             best = candidate
 
-    if best is None or best[3] < 0.35:
+    if best is None or best[4] < 0.35:
         return None
-    row = best[2]
+    row = best[3]
     # Normalized fill height: 0 is empty at ROI bottom; 1 reaches its top.
     return {
         "height_ratio": round((count - row) / count, 4),
-        "confidence": round(best[3], 3),
+        "confidence": round(best[4], 3),
         "surface_row_ratio": round(row / count, 4),
-        "contrast": round(best[0], 3),
+        "contrast": round(best[1], 3),
     }
 
 
-def analyze_image(image_path, roi=None):
+def analyze_image(image_path, roi=None, previous_ratio=None):
     """Analyze an image and return fields that fit the photos database row."""
     from PIL import Image
 
@@ -92,6 +106,12 @@ def analyze_image(image_path, roi=None):
         right = max(left + 1, min(width, round(float(roi["x1"]) * width)))
         top = max(0, min(height - 1, round(float(roi["y0"]) * height)))
         bottom = max(top + 1, min(height, round(float(roi["y1"]) * height)))
+        # Use the central interior of the selected jar area. This suppresses
+        # shelf edges and reflections entering from the sides of a clear pot.
+        margin = round((right - left) * 0.20)
+        if right - left - 2 * margin >= 24:
+            left += margin
+            right -= margin
         crop = image.crop((left, top, right, bottom))
 
     pixels = list(crop.getdata())
@@ -102,9 +122,10 @@ def analyze_image(image_path, roi=None):
         row = pixels[y * crop_width:(y + 1) * crop_width]
         fractions.append(sum(1 for value in row if value >= threshold) / crop_width)
 
-    estimate = estimate_surface(fractions)
+    estimate = estimate_surface(fractions, previous_ratio=previous_ratio)
     if estimate is None:
-        details = {"valid": False, "reason": "no_surface_transition", "roi": roi}
+        details = {"valid": False, "reason": "no_surface_transition", "roi": roi,
+                   "detector_version": DETECTOR_VERSION}
         return {"growth_score": None, "growth_detected": None, "analysis_json": json.dumps(details)}
 
     surface_y = top + round(estimate["surface_row_ratio"] * (bottom - top))
@@ -113,6 +134,7 @@ def analyze_image(image_path, roi=None):
         "threshold": threshold,
         "surface_y_ratio": round(surface_y / height, 4),
         "roi": roi,
+        "detector_version": DETECTOR_VERSION,
     })
     return {
         "growth_score": estimate["height_ratio"],

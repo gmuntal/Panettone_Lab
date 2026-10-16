@@ -58,12 +58,12 @@ function renderGrowth(data) {
     $('growth-change').className=`growth-change ${data.direction}`;
     if(data.change_points===null){
       $('growth-change').textContent='Sense referència';
-      $('growth-detail').textContent=`Confiança ${Math.round((measurement.confidence||0)*100)}% · Marca el nivell inicial quan el pot estigui a punt.`;
+      $('growth-detail').textContent='Transició visual detectada · Marca el nivell inicial quan el pot estigui a punt.';
     }else{
       const sign=data.change_points>0?'+':'';
       const label={pujant:'Pujant',baixant:'Baixant',estable:'Estable'}[data.direction]||'Canvi visual';
       $('growth-change').textContent=`${label} · ${sign}${data.change_points} punts`;
-      $('growth-detail').textContent=`Comparat amb ${fmtTime(data.baseline.captured_at)} · confiança ${Math.round((measurement.confidence||0)*100)}%.`;
+      $('growth-detail').textContent=`Comparat amb ${fmtTime(data.baseline.captured_at)} · seguiment visual continu.`;
     }
   }
   $('baseline-button').disabled=!measurement?.valid || (measurement.confidence||0)<.45;

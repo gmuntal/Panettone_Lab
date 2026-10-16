@@ -1,13 +1,14 @@
 import logging
+import json
 import os
 import threading
 import time
 from datetime import datetime
 
 from .config import settings
-from .database import add_photo, add_reading, growth_config, monitoring_state
+from .database import add_photo, add_reading, growth_config, latest_analyzed_photo, monitoring_state
 from .devices import capture_photo, read_shelly
-from .growth_detection import analyze_image
+from .growth_detection import DETECTOR_VERSION, analyze_image
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +49,16 @@ def photo_loop(stop):
                 os.remove(destination)
                 continue
             try:
-                analysis = analyze_image(destination, growth_config()["roi"])
+                previous_ratio = None
+                previous_photo = latest_analyzed_photo()
+                if previous_photo and previous_photo.get("growth_score") is not None:
+                    try:
+                        previous_analysis = json.loads(previous_photo.get("analysis_json") or "{}")
+                        if previous_analysis.get("detector_version") == DETECTOR_VERSION:
+                            previous_ratio = float(previous_photo["growth_score"])
+                    except (TypeError, ValueError):
+                        pass
+                analysis = analyze_image(destination, growth_config()["roi"], previous_ratio)
             except Exception:
                 log.exception("Anàlisi visual de creixement fallida")
                 analysis = None

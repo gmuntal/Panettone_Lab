@@ -17,6 +17,18 @@ class GrowthDetectionTests(unittest.TestCase):
     def test_ignores_short_profile(self):
         self.assertIsNone(estimate_surface([0.1, 0.9] * 10))
 
+    def test_skips_an_upper_reflection_and_uses_the_lower_surface(self):
+        profile = [0.08] * 42 + [0.92] * 24 + [0.12] * 30 + [0.90] * 64
+        result = estimate_surface(profile)
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result['height_ratio'], 0.40, delta=0.04)
+
+    def test_tracks_the_nearest_surface_transition(self):
+        profile = [0.08] * 42 + [0.92] * 24 + [0.12] * 30 + [0.90] * 64
+        result = estimate_surface(profile, previous_ratio=0.41)
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result['height_ratio'], 0.40, delta=0.04)
+
     def test_default_roi_is_normalized_and_has_usable_size(self):
         self.assertTrue(all(0 <= value <= 1 for value in DEFAULT_ROI.values()))
         self.assertGreaterEqual(DEFAULT_ROI['x1'] - DEFAULT_ROI['x0'], 0.06)
