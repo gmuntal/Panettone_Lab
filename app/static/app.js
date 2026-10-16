@@ -7,6 +7,7 @@ async function json(url, options={}) {
   if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
   return payload;
 }
+let freshPreviewUrl = null;
 
 function drawChart(rows) {
   const canvas=$('chart'),box=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
@@ -67,7 +68,7 @@ function renderGrowth(data) {
   }
   $('baseline-button').disabled=!measurement?.valid || (measurement.confidence||0)<.45;
   $('baseline-button').textContent=data.baseline?'Reinicia el nivell inicial':'Marca el nivell inicial';
-  if(photo?.filename){
+  if(photo?.filename&&!freshPreviewUrl){
     const image=$('growth-preview');
     const url=`/photos/${encodeURIComponent(photo.filename)}`;
     if(image.dataset.photo!==url){image.src=url;image.dataset.photo=url;}
@@ -107,6 +108,35 @@ $('growth-preview').addEventListener('pointermove',event=>{
 });
 const finishRoi=()=>{roiDrag=null;};
 $('growth-preview').addEventListener('pointerup',finishRoi);$('growth-preview').addEventListener('pointercancel',finishRoi);
+
+const calibration=$('growth-calibration'),roiMessage=$('roi-message'),saveRoiButton=$('save-roi');
+let previewRequest=null;
+calibration.addEventListener('toggle',async()=>{
+  const image=$('growth-preview');
+  if(!calibration.open){
+    previewRequest?.abort();previewRequest=null;
+    if(freshPreviewUrl){URL.revokeObjectURL(freshPreviewUrl);freshPreviewUrl=null;}
+    image.removeAttribute('src');image.dataset.photo='';saveRoiButton.disabled=true;
+    return;
+  }
+  previewRequest?.abort();const controller=new AbortController();previewRequest=controller;saveRoiButton.disabled=true;
+  roiMessage.textContent='Capturant una imatge actual de la càmera…';
+  try{
+    const response=await fetch('/api/growth/preview',{method:'POST',credentials:'same-origin',cache:'no-store',signal:controller.signal});
+    if(response.status===401){location.href='/login';throw new Error('Sessió caducada');}
+    if(!response.ok){const payload=await response.json();throw new Error(payload.error||'No s’ha pogut capturar la imatge.');}
+    const blob=await response.blob();
+    if(!calibration.open)return;
+    if(freshPreviewUrl)URL.revokeObjectURL(freshPreviewUrl);
+    freshPreviewUrl=URL.createObjectURL(blob);image.dataset.photo='fresh-preview';
+    const loaded=new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('No s’ha pogut mostrar la captura actual.'));});
+    image.src=freshPreviewUrl;await loaded;
+    saveRoiButton.disabled=false;roiMessage.textContent='Captura actual de la càmera; no es desa a l’historial.';
+    renderRoi();
+  }catch(error){
+    if(error.name!=='AbortError')roiMessage.textContent=error.message==='Sessió caducada'?error.message:`${error.message} Tanca i torna a obrir la configuració per provar-ho de nou.`;
+  }finally{if(previewRequest===controller)previewRequest=null;}
+});
 
 async function refresh() {
   try {

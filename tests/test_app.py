@@ -49,12 +49,25 @@ class AppTests(unittest.TestCase):
 
     def test_growth_configuration_requires_login_and_can_be_calibrated(self):
         self.assertEqual(self.client.get("/api/growth").status_code, 401)
+        self.assertEqual(self.client.post("/api/growth/preview").status_code, 401)
         self.client.post("/login", data={"username": "tester", "password": "correct-horse-battery-staple"})
 
         initial = self.client.get("/api/growth")
         self.assertEqual(initial.status_code, 200)
         self.assertEqual(initial.json["direction"], "pendent")
         self.assertIsNone(initial.json["baseline"])
+
+        def fake_capture(destination):
+            with open(destination, "wb") as image_file:
+                image_file.write(b"jpeg-preview" + b"x" * 1024)
+
+        with patch("app.main.capture_photo", side_effect=fake_capture):
+            preview = self.client.post("/api/growth/preview")
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.mimetype, "image/jpeg")
+        self.assertEqual(preview.headers["Cache-Control"], "no-store")
+        self.assertTrue(preview.data.startswith(b"jpeg-preview"))
+        self.assertFalse(os.path.exists(os.path.join(self.temp.name, "photos")))
 
         response = self.client.post("/api/growth/roi", json={"x0": 0.3, "y0": 0.2, "x1": 0.7, "y1": 0.9})
         self.assertEqual(response.status_code, 200)

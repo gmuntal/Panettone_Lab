@@ -1,15 +1,18 @@
 import os
 import json
+import tempfile
 import threading
+from io import BytesIO
 from functools import wraps
 
-from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 
 from .config import settings, validate_settings
 from .database import (growth_config, growth_history, init_db, latest_analyzed_photo,
                        monitoring_state, set_monitoring_active,
                        latest_state, recent_photos, recent_readings, save_growth_roi,
                        set_growth_baseline, update_photo_analysis)
+from .devices import capture_photo
 from .growth_detection import analyze_image
 from .scheduler import start_workers
 
@@ -136,6 +139,23 @@ def create_app(start_background=False):
         return jsonify({"roi": config["roi"], "baseline": baseline, "photo": photo,
                         "measurement": measurement, "change_points": change_points,
                         "direction": direction})
+
+    @app.post("/api/growth/preview")
+    @login_required
+    def growth_preview():
+        # This one-off preview is intentionally not added to the photo history.
+        try:
+            with tempfile.TemporaryDirectory(prefix="panettone-preview-") as directory:
+                path = os.path.join(directory, "preview.jpg")
+                capture_photo(path)
+                with open(path, "rb") as image_file:
+                    image = BytesIO(image_file.read())
+        except Exception:
+            return jsonify({"error": "No s’ha pogut obtenir una captura actual. Comprova que la càmera estigui connectada."}), 503
+        image.seek(0)
+        response = send_file(image, mimetype="image/jpeg", download_name="growth-preview.jpg", max_age=0)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/growth/history")
     @login_required
