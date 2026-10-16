@@ -75,6 +75,16 @@ function renderGrowth(data) {
   renderRoi(data.roi);
 }
 
+function renderMonitoring(state) {
+  const badge=$('monitoring-status'),button=$('monitoring-button');
+  badge.classList.toggle('paused',!state.active);
+  badge.innerHTML=`<i></i> ${state.active?'SEGUIMENT ACTIU':'ATURAT'}`;
+  button.textContent=state.active?'Atura seguiment':'Inicia seguiment';
+  button.classList.toggle('stop',state.active);
+  const camera=$('camera-status');
+  if(!state.active){camera.className='camera-status paused';camera.querySelector('span').textContent='Seguiment aturat';}
+}
+
 let roi = {x0:.36,y0:.32,x1:.58,y1:.95};
 let roiDrag = null;
 function renderRoi(value) {
@@ -100,15 +110,16 @@ $('growth-preview').addEventListener('pointerup',finishRoi);$('growth-preview').
 
 async function refresh() {
   try {
-    const [state,readings,photos,growth,history]=await Promise.all([
+    const [state,readings,photos,growth,history,monitoring]=await Promise.all([
       json('/api/state'),json(`/api/readings?hours=${$('range').value}`),json('/api/photos?limit=24'),
-      json('/api/growth'),json('/api/growth/history?limit=500')
+      json('/api/growth'),json('/api/growth/history?limit=500'),json('/api/monitoring')
     ]);
+    renderMonitoring(monitoring);
     const reading=state.reading;
     if(reading&&reading.sensor_ok){$('temperature').innerHTML=`${Number(reading.temperature_c).toFixed(1)}<small>°C</small>`;$('humidity').innerHTML=`${Number(reading.humidity_rh).toFixed(1)}<small>%</small>`;$('temperature-time').textContent=`Darrera lectura · ${fmtTime(reading.captured_at)}`;$('humidity-time').textContent='Relativa de l’ambient';}
     else if(reading){$('temperature-time').textContent='No s’ha pogut llegir el Shelly';$('humidity-time').textContent=`Darrera prova · ${fmtTime(reading.captured_at)}`;}
     const photo=state.photo,camera=$('camera-status');
-    if(photo){$('photo-time').textContent=`Darrera captura · ${fmtTime(photo.captured_at)}`;camera.className=`camera-status ${photo.camera_ok?'ok':'bad'}`;camera.querySelector('span').textContent=photo.camera_ok?'Connectada':'Sense connexió';}
+    if(photo){$('photo-time').textContent=`Darrera captura · ${fmtTime(photo.captured_at)}`;camera.className=monitoring.active?`camera-status ${photo.camera_ok?'ok':'bad'}`:'camera-status paused';camera.querySelector('span').textContent=monitoring.active?(photo.camera_ok?'Connectada':'Sense connexió'):'Seguiment aturat';}
     drawChart(readings);drawGrowthChart(history);renderGrowth(growth);
     $('photo-count').textContent=`${photos.length} ${photos.length===1?'imatge':'imatges'}`;
     const grid=$('photo-grid');grid.replaceChildren();
@@ -130,6 +141,13 @@ $('save-roi').addEventListener('click',async()=>{
   $('roi-message').textContent='Desant i comprovant la zona…';
   try{const data=await json('/api/growth/roi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(roi)});renderGrowth(data);$('roi-message').textContent='Zona desada. La captura següent farà servir aquest retall.';await refresh();}
   catch(error){$('roi-message').textContent=`No s’ha pogut desar: ${error.message}`;}
+});
+
+$('monitoring-button').addEventListener('click',async()=>{
+  const button=$('monitoring-button');button.disabled=true;
+  try{const current=await json('/api/monitoring');await json('/api/monitoring',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:!current.active})});await refresh();}
+  catch(error){if(error.message!=='Sessió caducada')$('growth-detail').textContent=`No s’ha pogut canviar l’estat: ${error.message}`;}
+  finally{button.disabled=false;}
 });
 
 $('range').addEventListener('change',refresh);let timer;

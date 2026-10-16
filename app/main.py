@@ -7,6 +7,7 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, sen
 
 from .config import settings, validate_settings
 from .database import (growth_config, growth_history, init_db, latest_analyzed_photo,
+                       monitoring_state, set_monitoring_active,
                        latest_state, recent_photos, recent_readings, save_growth_roi,
                        set_growth_baseline, update_photo_analysis)
 from .growth_detection import analyze_image
@@ -77,6 +78,19 @@ def create_app(start_background=False):
     @login_required
     def state():
         return jsonify(latest_state())
+
+    @app.get("/api/monitoring")
+    @login_required
+    def monitoring():
+        return jsonify(monitoring_state())
+
+    @app.post("/api/monitoring")
+    @login_required
+    def set_monitoring():
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or not isinstance(payload.get("active"), bool):
+            abort(400)
+        return jsonify(set_monitoring_active(payload["active"]))
 
     @app.get("/api/readings")
     @login_required

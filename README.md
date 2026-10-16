@@ -1,4 +1,4 @@
-# Panettone Lab v0.2.1
+# Panettone Lab v0.3.0
 
 PWA local en català per observar la fermentació del lievito madre. El servei és autònom i no depèn de Cuinetes: parla directament amb la Tapo C210 i el Shelly Plus UNI a la xarxa local.
 
@@ -14,6 +14,7 @@ GitHub Actions --> GHCR (amd64 + arm64) --> Portainer Stack des d'aquest reposit
 
 - Un contenidor i un procés Gunicorn amb un worker: els treballs periòdics s’executen una sola vegada.
 - Fotografia cada 120 segons; temperatura i humitat cada 30 segons.
+- El seguiment es pot iniciar i aturar des del dashboard. Aturat, no es fan lectures ni es capturen fotos; l’estat es conserva a SQLite i també després de reiniciar el contenidor. En una instal·lació nova queda aturat fins que s’inicia manualment.
 - Base SQLite, fotografies i estat preparats dins d’un volum persistent.
 - L’anàlisi visual estima l’alçada de la massa dins una zona del pot que es pot calibrar des del dashboard. Es pot marcar un nivell inicial i seguir-ne la variació al llarg del temps. És una estimació d’alçada visible, no del pes ni del volum real.
 - Els fotogrames sense una transició prou clara es desen sense mesura. La càmera i el pot han de quedar fixos; cal revisar la zona calibrada després de moure’ls.
@@ -45,7 +46,7 @@ En producció amb HTTPS, defineix `SESSION_COOKIE_SECURE=true`. Mantén el serve
 5. Afegeix a la configuració de variables d’entorn de la Stack `APP_SECRET_KEY`, `AUTH_USERNAME` i `AUTH_PASSWORD` (obligatòries); introdueix-hi també les credencials de dispositius si en fas servir. No pugis `.env` ni secrets a Git. Ajusta `GHCR_IMAGE` al camí real del paquet. Per a `docker compose` local, copia `.env.example` a `.env`.
 6. Portainer crea el volum `panettone_lab_data`. Abans d’actualitzar, mantén còpia de seguretat d’aquest volum; un deploy de Stack no l’esborra.
 
-Per a un deploy reproduïble, canvia `IMAGE_TAG` a un tag semàntic (`v0.2.0`, per exemple) i fes que el commit de GitOps apunti a aquell tag. `latest` simplifica la primera instal·lació però és mutable.
+Per a un deploy reproduïble, canvia `IMAGE_TAG` a un tag semàntic (`v0.3.0`, per exemple) i fes que el commit de GitOps apunti a aquell tag. `latest` simplifica la primera instal·lació però és mutable.
 
 ## Configuració
 

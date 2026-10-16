@@ -42,7 +42,27 @@ def init_db() -> None:
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS monitoring_control (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            active INTEGER NOT NULL DEFAULT 0,
+            changed_at TEXT NOT NULL
+        );
         """)
+        db.execute("INSERT OR IGNORE INTO monitoring_control(id,active,changed_at) VALUES(1,0,?)",
+                   (utc_now(),))
+
+
+def monitoring_state():
+    with connect() as db:
+        row = db.execute("SELECT active,changed_at FROM monitoring_control WHERE id=1").fetchone()
+    return {"active": bool(row["active"]), "changed_at": row["changed_at"]}
+
+
+def set_monitoring_active(active):
+    with connect() as db:
+        db.execute("UPDATE monitoring_control SET active=?,changed_at=? WHERE id=1",
+                   (int(bool(active)), utc_now()))
+    return monitoring_state()
 
 
 @contextmanager
