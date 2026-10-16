@@ -35,6 +35,7 @@ services:
       - /tmp:size=64m,noexec,nosuid
     security_opt:
       - no-new-privileges:true
+      - seccomp=unconfined
     cap_drop:
       - ALL
     healthcheck:
