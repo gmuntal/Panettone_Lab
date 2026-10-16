@@ -59,6 +59,7 @@ Per a un deploy reproduïble, canvia `IMAGE_TAG` a un tag semàntic (`v0.1.0`, p
 | `AUTH_USERNAME`, `AUTH_PASSWORD` | obligatori | Protecció del dashboard |
 | `APP_SECRET_KEY` | obligatori | Signatura de sessió, mínim 32 caràcters |
 | `SESSION_COOKIE_SECURE` | `false` | Activa-ho darrere d’HTTPS |
+| `CONTAINER_PLATFORM` | `linux/arm64` | Plataforma d’imatge; Pi 4 per defecte, usa `linux/amd64` en un host Intel/AMD |
 
 ## Dades i API
 
