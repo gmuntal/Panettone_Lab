@@ -1,0 +1,1 @@
+"""Panettone Lab application package."""

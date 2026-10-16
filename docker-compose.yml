@@ -1,0 +1,46 @@
+services:
+  panettone-lab:
+    image: ${GHCR_IMAGE:-ghcr.io/OWNER/panettone-lab}:${IMAGE_TAG:-latest}
+    container_name: panettone-lab
+    restart: unless-stopped
+    init: true
+    environment:
+      DATA_DIR: /data
+      DATABASE_PATH: /data/panettone.db
+      PHOTO_DIR: /data/photos
+      TZ: Europe/Madrid
+      APP_SECRET_KEY: "${APP_SECRET_KEY:?Set APP_SECRET_KEY in the stack}"
+      AUTH_USERNAME: "${AUTH_USERNAME:?Set AUTH_USERNAME in the stack}"
+      AUTH_PASSWORD: "${AUTH_PASSWORD:?Set AUTH_PASSWORD in the stack}"
+      SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-false}"
+      CAMERA_RTSP_URL: "${CAMERA_RTSP_URL:-rtsp://10.85.3.237:554/stream1}"
+      CAMERA_USERNAME: "${CAMERA_USERNAME:-}"
+      CAMERA_PASSWORD: "${CAMERA_PASSWORD:-}"
+      SHELLY_URL: "${SHELLY_URL:-http://10.85.3.202/rpc/Shelly.GetStatus}"
+      SHELLY_USERNAME: "${SHELLY_USERNAME:-}"
+      SHELLY_PASSWORD: "${SHELLY_PASSWORD:-}"
+      TEMPERATURE_KEY: "${TEMPERATURE_KEY:-temperature:100.tC}"
+      HUMIDITY_KEY: "${HUMIDITY_KEY:-humidity:100.rh}"
+      SENSOR_INTERVAL_SECONDS: "${SENSOR_INTERVAL_SECONDS:-30}"
+      PHOTO_INTERVAL_SECONDS: "${PHOTO_INTERVAL_SECONDS:-120}"
+    ports:
+      - "${PANETTONE_PORT:-8088}:8080"
+    volumes:
+      - panettone_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  panettone_data:
+    name: panettone_lab_data
