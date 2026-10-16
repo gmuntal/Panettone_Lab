@@ -5,8 +5,9 @@ import time
 from datetime import datetime
 
 from .config import settings
-from .database import add_photo, add_reading
+from .database import add_photo, add_reading, growth_config
 from .devices import capture_photo, read_shelly
+from .growth_detection import analyze_image
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +29,12 @@ def photo_loop(stop):
         destination = os.path.join(settings.photo_dir, filename)
         try:
             capture_photo(destination)
-            add_photo(filename)
+            try:
+                analysis = analyze_image(destination, growth_config()["roi"])
+            except Exception:
+                log.exception("Anàlisi visual de creixement fallida")
+                analysis = None
+            add_photo(filename, analysis=analysis)
         except Exception as exc:
             log.warning("Captura de càmera fallida: %s", exc)
             add_photo("", type(exc).__name__)

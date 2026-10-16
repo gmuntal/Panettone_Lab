@@ -47,6 +47,23 @@ class AppTests(unittest.TestCase):
         response = self.client.post("/login", data={"username": "tester", "password": "wrong"})
         self.assertEqual(response.status_code, 401)
 
+    def test_growth_configuration_requires_login_and_can_be_calibrated(self):
+        self.assertEqual(self.client.get("/api/growth").status_code, 401)
+        self.client.post("/login", data={"username": "tester", "password": "correct-horse-battery-staple"})
+
+        initial = self.client.get("/api/growth")
+        self.assertEqual(initial.status_code, 200)
+        self.assertEqual(initial.json["direction"], "pendent")
+        self.assertIsNone(initial.json["baseline"])
+
+        response = self.client.post("/api/growth/roi", json={"x0": 0.3, "y0": 0.2, "x1": 0.7, "y1": 0.9})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["roi"], {"x0": 0.3, "y0": 0.2, "x1": 0.7, "y1": 0.9})
+
+        invalid = self.client.post("/api/growth/roi", json={"x0": 0.7, "y0": 0.2, "x1": 0.3, "y1": 0.9})
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(self.client.post("/api/growth/calibrate", json={}).status_code, 409)
+
 
 class DeviceTests(unittest.TestCase):
     def test_read_shelly_rpc_paths(self):

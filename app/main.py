@@ -1,11 +1,15 @@
 import os
+import json
 import threading
 from functools import wraps
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 
 from .config import settings, validate_settings
-from .database import init_db, latest_state, recent_photos, recent_readings
+from .database import (growth_config, growth_history, init_db, latest_analyzed_photo,
+                       latest_state, recent_photos, recent_readings, save_growth_roi,
+                       set_growth_baseline, update_photo_analysis)
+from .growth_detection import analyze_image
 from .scheduler import start_workers
 
 
@@ -90,6 +94,84 @@ def create_app(start_background=False):
         if limit is None:
             abort(400)
         return jsonify(recent_photos(min(500, max(1, limit))))
+
+    @app.get("/api/growth")
+    @login_required
+    def growth():
+        config = growth_config()
+        photo = latest_analyzed_photo()
+        measurement = None
+        if photo:
+            try:
+                measurement = json.loads(photo["analysis_json"] or "{}")
+            except (TypeError, ValueError):
+                measurement = None
+        baseline = config["baseline"]
+        change_points = None
+        direction = "pendent"
+        if measurement and measurement.get("valid") and photo:
+            direction = "sense_referencia"
+            if baseline and isinstance(baseline.get("height_ratio"), (int, float)):
+                change_points = round((photo["growth_score"] - baseline["height_ratio"]) * 100, 1)
+                if change_points > 1.5:
+                    direction = "pujant"
+                elif change_points < -1.5:
+                    direction = "baixant"
+                else:
+                    direction = "estable"
+        return jsonify({"roi": config["roi"], "baseline": baseline, "photo": photo,
+                        "measurement": measurement, "change_points": change_points,
+                        "direction": direction})
+
+    @app.get("/api/growth/history")
+    @login_required
+    def growth_readings():
+        limit = request.args.get("limit", default=500, type=int)
+        if limit is None:
+            abort(400)
+        return jsonify(growth_history(min(2000, max(1, limit))))
+
+    @app.post("/api/growth/roi")
+    @login_required
+    def growth_roi():
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            abort(400)
+        roi = {}
+        try:
+            for key in ("x0", "y0", "x1", "y1"):
+                value = float(payload[key])
+                if not 0 <= value <= 1:
+                    abort(400)
+                roi[key] = round(value, 4)
+        except (KeyError, TypeError, ValueError):
+            abort(400)
+        if roi["x1"] - roi["x0"] < 0.06 or roi["y1"] - roi["y0"] < 0.12:
+            abort(400)
+        save_growth_roi(roi)
+        photo = latest_analyzed_photo()
+        if photo and photo.get("filename"):
+            path = os.path.join(settings.photo_dir, photo["filename"])
+            if os.path.isfile(path):
+                analysis = analyze_image(path, roi)
+                update_photo_analysis(photo["id"], analysis)
+        return growth()
+
+    @app.post("/api/growth/calibrate")
+    @login_required
+    def growth_calibrate():
+        photo = latest_analyzed_photo()
+        if not photo:
+            return jsonify({"error": "Encara no hi ha cap captura amb detecció fiable."}), 409
+        try:
+            measurement = json.loads(photo["analysis_json"] or "{}")
+        except (TypeError, ValueError):
+            measurement = {}
+        if (not measurement.get("valid") or
+                float(measurement.get("confidence", 0)) < 0.45):
+            return jsonify({"error": "La darrera captura no és prou clara per fixar la referència."}), 409
+        set_growth_baseline(photo["growth_score"], photo["captured_at"])
+        return growth()
 
     @app.get("/photos/<path:filename>")
     @login_required
