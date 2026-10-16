@@ -61,11 +61,17 @@ class AppTests(unittest.TestCase):
             with open(destination, "wb") as image_file:
                 image_file.write(b"jpeg-preview" + b"x" * 1024)
 
-        with patch("app.main.capture_photo", side_effect=fake_capture):
-            preview = self.client.post("/api/growth/preview")
+        analysis = {"growth_score": 0.31, "analysis_json": '{"valid":true,"height_ratio":0.31,"confidence":0.82}'}
+        with patch("app.main.capture_photo", side_effect=fake_capture), \
+             patch("app.main.analyze_image", return_value=analysis) as analyze:
+            preview = self.client.post("/api/growth/preview", json={"roi": {"x0": 0.3, "y0": 0.2, "x1": 0.7, "y1": 0.9}})
         self.assertEqual(preview.status_code, 200)
         self.assertEqual(preview.mimetype, "image/jpeg")
         self.assertEqual(preview.headers["Cache-Control"], "no-store")
+        self.assertEqual(preview.headers["X-Growth-Valid"], "true")
+        self.assertEqual(preview.headers["X-Growth-Score"], "0.31")
+        self.assertEqual(preview.headers["X-Growth-Confidence"], "0.82")
+        analyze.assert_called_once_with(analyze.call_args.args[0], {"x0": 0.3, "y0": 0.2, "x1": 0.7, "y1": 0.9})
         self.assertTrue(preview.data.startswith(b"jpeg-preview"))
         self.assertFalse(os.path.exists(os.path.join(self.temp.name, "photos")))
 

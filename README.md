@@ -1,4 +1,4 @@
-# Panettone Lab v0.3.3
+# Panettone Lab v0.3.4
 
 PWA local en català per observar la fermentació del lievito madre. El servei és autònom i no depèn de Cuinetes: parla directament amb la Tapo C210 i el Shelly Plus UNI a la xarxa local.
 
@@ -17,7 +17,7 @@ GitHub Actions --> GHCR (amd64 + arm64) --> Portainer Stack des d'aquest reposit
 - El seguiment es pot iniciar i aturar des del dashboard. Aturat, no es fan lectures ni es capturen fotos; l’estat es conserva a SQLite i també després de reiniciar el contenidor. En una instal·lació nova queda aturat fins que s’inicia manualment.
 - Base SQLite, fotografies i estat preparats dins d’un volum persistent.
 - L’anàlisi visual estima l’alçada de la massa dins una zona del pot que es pot calibrar des del dashboard. Es pot marcar un nivell inicial i seguir-ne la variació al llarg del temps. És una estimació d’alçada visible, no del pes ni del volum real.
-- En obrir «Configura la zona del pot», es captura una imatge actual només per a la previsualització; no s’afegeix a l’historial de fotografies.
+- En obrir «Configura la zona del pot», es captura una imatge actual i se’n prova la detecció provisional amb la zona seleccionada; no s’afegeix a l’historial de fotografies. Es pot repetir la prova després d’ajustar el rectangle.
 - Els fotogrames sense una transició prou clara es desen sense mesura. La càmera i el pot han de quedar fixos; cal revisar la zona calibrada després de moure’ls.
 - Pillow redimensiona les captures abans de l’anàlisi per mantenir baix el cost de CPU a la Raspberry Pi.
 - El service worker desa només l’esquelet estàtic. Dades, captures i sessió requereixen connexió i autenticació.

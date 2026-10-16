@@ -144,10 +144,33 @@ def create_app(start_background=False):
     @login_required
     def growth_preview():
         # This one-off preview is intentionally not added to the photo history.
+        payload = request.get_json(silent=True)
+        roi = growth_config()["roi"]
+        if payload is not None:
+            if not isinstance(payload, dict):
+                abort(400)
+            supplied_roi = payload.get("roi")
+            if supplied_roi is not None:
+                if not isinstance(supplied_roi, dict):
+                    abort(400)
+                try:
+                    roi = {key: round(float(supplied_roi[key]), 4)
+                           for key in ("x0", "y0", "x1", "y1")}
+                except (KeyError, TypeError, ValueError):
+                    abort(400)
+                if (any(not 0 <= value <= 1 for value in roi.values()) or
+                        roi["x1"] - roi["x0"] < 0.06 or roi["y1"] - roi["y0"] < 0.12):
+                    abort(400)
         try:
             with tempfile.TemporaryDirectory(prefix="panettone-preview-") as directory:
                 path = os.path.join(directory, "preview.jpg")
                 capture_photo(path)
+                try:
+                    analysis = analyze_image(path, roi)
+                    measurement = json.loads(analysis["analysis_json"])
+                except Exception:
+                    # Keep calibration useful if an unusual frame cannot be analyzed.
+                    measurement = {"valid": False, "reason": "preview_analysis_failed"}
                 with open(path, "rb") as image_file:
                     image = BytesIO(image_file.read())
         except Exception:
@@ -155,6 +178,12 @@ def create_app(start_background=False):
         image.seek(0)
         response = send_file(image, mimetype="image/jpeg", download_name="growth-preview.jpg", max_age=0)
         response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Growth-Valid"] = "true" if measurement.get("valid") else "false"
+        if measurement.get("valid"):
+            response.headers["X-Growth-Score"] = str(measurement.get("height_ratio", ""))
+            response.headers["X-Growth-Confidence"] = str(measurement.get("confidence", ""))
+        else:
+            response.headers["X-Growth-Reason"] = str(measurement.get("reason", "unknown"))
         return response
 
     @app.get("/api/growth/history")

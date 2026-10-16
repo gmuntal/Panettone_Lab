@@ -109,34 +109,46 @@ $('growth-preview').addEventListener('pointermove',event=>{
 const finishRoi=()=>{roiDrag=null;};
 $('growth-preview').addEventListener('pointerup',finishRoi);$('growth-preview').addEventListener('pointercancel',finishRoi);
 
-const calibration=$('growth-calibration'),roiMessage=$('roi-message'),saveRoiButton=$('save-roi');
+const calibration=$('growth-calibration'),roiMessage=$('roi-message'),saveRoiButton=$('save-roi'),testRoiButton=$('test-roi');
 let previewRequest=null;
-calibration.addEventListener('toggle',async()=>{
+async function captureRoiPreview(){
   const image=$('growth-preview');
-  if(!calibration.open){
-    previewRequest?.abort();previewRequest=null;
-    if(freshPreviewUrl){URL.revokeObjectURL(freshPreviewUrl);freshPreviewUrl=null;}
-    image.removeAttribute('src');image.dataset.photo='';saveRoiButton.disabled=true;
-    return;
-  }
-  previewRequest?.abort();const controller=new AbortController();previewRequest=controller;saveRoiButton.disabled=true;
-  roiMessage.textContent='Capturant una imatge actual de la càmera…';
+  previewRequest?.abort();const controller=new AbortController();previewRequest=controller;
+  testRoiButton.disabled=true;saveRoiButton.disabled=true;
+  roiMessage.textContent='Capturant i comprovant aquesta zona…';
   try{
-    const response=await fetch('/api/growth/preview',{method:'POST',credentials:'same-origin',cache:'no-store',signal:controller.signal});
+    const response=await fetch('/api/growth/preview',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify({roi}),signal:controller.signal});
     if(response.status===401){location.href='/login';throw new Error('Sessió caducada');}
     if(!response.ok){const payload=await response.json();throw new Error(payload.error||'No s’ha pogut capturar la imatge.');}
+    const valid=response.headers.get('X-Growth-Valid')==='true';
+    const score=Number(response.headers.get('X-Growth-Score'));
+    const confidence=Number(response.headers.get('X-Growth-Confidence'));
     const blob=await response.blob();
     if(!calibration.open)return;
     if(freshPreviewUrl)URL.revokeObjectURL(freshPreviewUrl);
     freshPreviewUrl=URL.createObjectURL(blob);image.dataset.photo='fresh-preview';
     const loaded=new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('No s’ha pogut mostrar la captura actual.'));});
     image.src=freshPreviewUrl;await loaded;
-    saveRoiButton.disabled=false;roiMessage.textContent='Captura actual de la càmera; no es desa a l’historial.';
+    saveRoiButton.disabled=false;testRoiButton.disabled=false;
+    roiMessage.textContent=valid
+      ? `Detecció provisional: ${Math.round(score*100)}% de la zona · confiança ${Math.round(confidence*100)}%. Captura no desada.`
+      : 'Aquesta captura no mostra una transició prou clara. Ajusta la zona o la il·luminació i torna-ho a provar. Captura no desada.';
     renderRoi();
   }catch(error){
-    if(error.name!=='AbortError')roiMessage.textContent=error.message==='Sessió caducada'?error.message:`${error.message} Tanca i torna a obrir la configuració per provar-ho de nou.`;
+    if(error.name!=='AbortError'){roiMessage.textContent=error.message==='Sessió caducada'?error.message:`${error.message} Torna-ho a provar.`;testRoiButton.disabled=false;}
   }finally{if(previewRequest===controller)previewRequest=null;}
+}
+calibration.addEventListener('toggle',async()=>{
+  const image=$('growth-preview');
+  if(!calibration.open){
+    previewRequest?.abort();previewRequest=null;
+    if(freshPreviewUrl){URL.revokeObjectURL(freshPreviewUrl);freshPreviewUrl=null;}
+    image.removeAttribute('src');image.dataset.photo='';saveRoiButton.disabled=true;testRoiButton.disabled=true;
+    return;
+  }
+  await captureRoiPreview();
 });
+testRoiButton.addEventListener('click',captureRoiPreview);
 
 async function refresh() {
   try {
