@@ -1,6 +1,7 @@
 services:
   panettone-lab:
     image: ${GHCR_IMAGE:-ghcr.io/OWNER/panettone-lab}:${IMAGE_TAG:-latest}
+    pull_policy: always
     # Raspberry Pi OS can report ARMv8 as linux/arm/v8 even on the 64-bit Pi 4.
     # Select the published 64-bit image explicitly; override for other hosts.
     platform: ${CONTAINER_PLATFORM:-linux/arm64}
