@@ -1,4 +1,4 @@
-# Panettone Lab v0.3.0
+# Panettone Lab v0.3.1
 
 PWA local en català per observar la fermentació del lievito madre. El servei és autònom i no depèn de Cuinetes: parla directament amb la Tapo C210 i el Shelly Plus UNI a la xarxa local.
 
