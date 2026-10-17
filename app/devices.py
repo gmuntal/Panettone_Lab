@@ -9,13 +9,17 @@ from requests.auth import HTTPDigestAuth
 from .config import settings
 
 
-def read_shelly():
+def read_shelly_components():
     auth = None
     if settings.shelly_username:
         auth = HTTPDigestAuth(settings.shelly_username, settings.shelly_password)
     response = requests.get(settings.shelly_url, auth=auth, timeout=8)
     response.raise_for_status()
-    payload = response.json()
+    return response.json()
+
+
+def read_shelly():
+    payload = read_shelly_components()
     temperature = payload
     humidity = payload
     for part in settings.temperature_key.split("."):

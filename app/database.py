@@ -81,6 +81,49 @@ def init_db() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_events_occurred ON events(occurred_at);
         CREATE INDEX IF NOT EXISTS idx_events_fermentation_time ON events(fermentation_id,occurred_at);
+        CREATE TABLE IF NOT EXISTS fermenter_settings (
+            id INTEGER PRIMARY KEY CHECK (id=1),
+            mode TEXT NOT NULL DEFAULT 'stopped',
+            target_c REAL NOT NULL DEFAULT 27.0,
+            hysteresis_c REAL NOT NULL DEFAULT 0.3,
+            min_switch_seconds INTEGER NOT NULL DEFAULT 60,
+            max_on_seconds INTEGER NOT NULL DEFAULT 1800,
+            overtemp_c REAL NOT NULL DEFAULT 35.0,
+            schedule_enabled INTEGER NOT NULL DEFAULT 0,
+            continuous INTEGER NOT NULL DEFAULT 1,
+            schedule_start TEXT NOT NULL DEFAULT '00:00',
+            schedule_end TEXT NOT NULL DEFAULT '23:59',
+            manual_on INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS fermenter_runtime (
+            id INTEGER PRIMARY KEY CHECK (id=1),
+            observed_at TEXT,
+            temperature_c REAL,
+            humidity_rh REAL,
+            sensor_ok INTEGER NOT NULL DEFAULT 0,
+            error TEXT,
+            switch0_on INTEGER,
+            switch1_on INTEGER,
+            simulated_heater_on INTEGER NOT NULL DEFAULT 0,
+            reason TEXT NOT NULL DEFAULT 'stopped',
+            heater_on_since TEXT,
+            last_switch_at TEXT,
+            lockout_reason TEXT
+        );
+        CREATE TABLE IF NOT EXISTS fermenter_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            occurred_at TEXT NOT NULL,
+            fermentation_id INTEGER REFERENCES fermentations(id),
+            event_type TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            temperature_c REAL,
+            target_c REAL,
+            simulated_heater_on INTEGER NOT NULL,
+            details TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_fermenter_actions_time ON fermenter_actions(occurred_at,id);
+        CREATE INDEX IF NOT EXISTS idx_fermenter_actions_fermentation ON fermenter_actions(fermentation_id,occurred_at);
         """)
         # Add nullable links in place. Existing readings and photographs remain untouched.
         for table in ("readings", "photos"):
@@ -90,6 +133,8 @@ def init_db() -> None:
             db.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_fermentation ON {table}(fermentation_id)")
         db.execute("INSERT OR IGNORE INTO monitoring_control(id,active,changed_at) VALUES(1,0,?)",
                    (utc_now(),))
+        db.execute("INSERT OR IGNORE INTO fermenter_settings(id,updated_at) VALUES(1,?)", (utc_now(),))
+        db.execute("INSERT OR IGNORE INTO fermenter_runtime(id) VALUES(1)")
 
 
 def monitoring_state():

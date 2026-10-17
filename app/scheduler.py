@@ -77,4 +77,6 @@ def start_workers():
     stop = threading.Event()
     for target, name in ((sensor_loop, "shelly-poller"), (photo_loop, "camera-capture")):
         threading.Thread(target=target, args=(stop,), name=name, daemon=True).start()
+    from .fermenter import start_worker as fermenter_worker
+    threading.Thread(target=fermenter_worker, args=(stop,), name="fermenter-simulation", daemon=True).start()
     return stop

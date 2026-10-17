@@ -39,6 +39,18 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.client.get("/").status_code, 200)
         self.assertEqual(self.client.get("/api/state").json, {"photo": None, "reading": None})
 
+    def test_fermenter_api_is_authenticated_and_explicitly_simulated(self):
+        self.assertEqual(self.client.get("/api/fermenter").status_code, 401)
+        self.client.post("/login", data={"username": "tester", "password": "correct-horse-battery-staple"})
+        state = self.client.get("/api/fermenter")
+        self.assertEqual(state.status_code, 200)
+        self.assertTrue(state.json["simulation_only"])
+        self.assertFalse(state.json["real_output_control_enabled"])
+        updated = self.client.post("/api/fermenter", json={"mode": "automatic", "target_c": 27.5})
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json["config"]["mode"], "automatic")
+        self.assertFalse(updated.json["real_output_control_enabled"])
+
     def test_pwa_resources_are_available(self):
         manifest = self.client.get("/manifest.webmanifest")
         service_worker = self.client.get("/service-worker.js")

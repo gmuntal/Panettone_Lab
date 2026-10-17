@@ -24,8 +24,9 @@ from .devices import capture_photo
 from .exporting import build_session_zip, get_observation_session, list_observation_sessions
 from .growth_detection import analyze_image
 from .scheduler import start_workers
+from .fermenter import get_state as get_fermenter_state, history as fermenter_history, update_settings as update_fermenter_settings
 
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -199,6 +200,29 @@ def create_app(start_background=False):
         if not isinstance(payload, dict) or not isinstance(payload.get("active"), bool):
             abort(400)
         return jsonify(set_monitoring_active(payload["active"]))
+
+    @app.get("/api/fermenter")
+    @login_required
+    def fermenter_state():
+        return jsonify(get_fermenter_state())
+
+    @app.get("/api/fermenter/history")
+    @login_required
+    def fermenter_history_api():
+        try:
+            hours = min(24 * 30, max(1, int(request.args.get("hours", "24"))))
+        except ValueError:
+            abort(400)
+        return jsonify(fermenter_history(hours))
+
+    @app.post("/api/fermenter")
+    @login_required
+    def set_fermenter():
+        payload = request.get_json(silent=True)
+        try:
+            return jsonify(update_fermenter_settings(payload))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
     @app.get("/api/readings")
     @login_required
