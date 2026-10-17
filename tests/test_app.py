@@ -18,7 +18,11 @@ class AppTests(unittest.TestCase):
         from app import config, database
         config.settings = Settings(data_dir=self.temp.name,
                                    database_path=os.path.join(self.temp.name, "test.db"),
-                                   photo_dir=os.path.join(self.temp.name, "photos"))
+                                   photo_dir=os.path.join(self.temp.name, "photos"),
+                                   app_secret_key=os.environ["APP_SECRET_KEY"],
+                                   auth_username=os.environ["AUTH_USERNAME"],
+                                   auth_password=os.environ["AUTH_PASSWORD"],
+                                   readonly_api_token=os.environ["READONLY_API_TOKEN"])
         database.settings = config.settings
         from app import main
         main.settings = config.settings
