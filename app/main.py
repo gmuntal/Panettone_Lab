@@ -5,7 +5,7 @@ import tempfile
 import threading
 import hmac
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from collections import deque
 import time
 from pathlib import Path
@@ -502,6 +502,11 @@ def create_app(start_background=False):
             abort(404)
         item = rows[0]
         end = item["ended_at"] or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        started = datetime.fromisoformat(item["started_at"].replace("Z", "+00:00"))
+        finished = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        if finished <= started:
+            # Start and finish may fall in the same second; export ranges are end-exclusive.
+            end = (started + timedelta(seconds=1)).isoformat(timespec="seconds")
         archive, metadata = build_session_zip(
             settings.database_path, settings.photo_dir, item["started_at"], end,
             app_version=APP_VERSION, timezone_name="Europe/Madrid",

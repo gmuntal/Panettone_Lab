@@ -78,7 +78,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(preview.headers["X-Growth-Confidence"], "0.82")
         analyze.assert_called_once_with(analyze.call_args.args[0], {"x0": 0.3, "y0": 0.2, "x1": 0.7, "y1": 0.9})
         self.assertTrue(preview.data.startswith(b"jpeg-preview"))
-        self.assertFalse(os.path.exists(os.path.join(self.temp.name, "photos")))
+        self.assertEqual(os.listdir(os.path.join(self.temp.name, "photos")), [])
 
         response = self.client.post("/api/growth/roi", json={"x0": 0.3, "y0": 0.2, "x1": 0.7, "y1": 0.9})
         self.assertEqual(response.status_code, 200)
@@ -145,7 +145,9 @@ class AppTests(unittest.TestCase):
         self.assertEqual(photos.json["items"][0]["fermentation_id"], fermentation_id)
         self.assertGreaterEqual(len(events.json["items"]), 2)
         photo_id = photos.json["items"][0]["id"]
-        self.assertEqual(self.client.get(f"/api/v1/photos/{photo_id}/image", headers=token_headers).data, b"original-jpeg")
+        image = self.client.get(f"/api/v1/photos/{photo_id}/image", headers=token_headers)
+        self.assertEqual(image.data, b"original-jpeg")
+        image.close()
         self.assertEqual(self.client.post("/api/v1/events", headers=token_headers, json={}).status_code, 405)
 
         ended = self.client.post(f"/api/fermentations/{fermentation_id}/end")
