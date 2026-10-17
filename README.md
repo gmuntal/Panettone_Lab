@@ -50,6 +50,8 @@ En producció amb HTTPS, defineix `SESSION_COOKIE_SECURE=true`. Mantén el serve
 
 Per a un deploy reproduïble, canvia `IMAGE_TAG` a un tag semàntic (`v0.4.0`, per exemple) i fes que el commit de GitOps apunti a aquell tag. `latest` simplifica la primera instal·lació però és mutable.
 
+Amb `latest`, GitOps pot detectar un commit abans que GitHub Actions acabi de publicar la imatge corresponent. Comprova que el workflow «Build and publish container» ha acabat correctament abans de forçar un redeploy amb «re-pull image»; si el redeploy s’ha avançat, torna’l a executar quan la publicació sigui verda. Amb tags immutables, actualitza `IMAGE_TAG` després que el tag s’hagi publicat.
+
 ## Configuració
 
 | Variable | Per defecte | Ús |
