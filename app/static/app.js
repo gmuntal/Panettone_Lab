@@ -8,6 +8,20 @@ async function json(url, options={}) {
   return payload;
 }
 let freshPreviewUrl = null;
+let activeFermentation = null;
+
+function formPayload(form) {
+  return Object.fromEntries([...new FormData(form)].filter(([,value])=>value!==''));
+}
+
+async function refreshFermentation() {
+  const data=await json('/api/fermentations');activeFermentation=data.active;
+  $('session-status').textContent=activeFermentation
+    ? `Fermentació #${activeFermentation.id} activa des de ${fmtTime(activeFermentation.started_at)}. Les lectures i fotografies noves s’hi associaran.`
+    : 'No hi ha cap fermentació activa. Les lectures continuen funcionant independentment.';
+  $('fermentation-form').hidden=Boolean(activeFermentation);
+  $('end-fermentation').hidden=!activeFermentation;
+}
 
 function drawChart(rows) {
   const canvas=$('chart'),box=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
@@ -154,7 +168,7 @@ async function refresh() {
   try {
     const [state,readings,photos,growth,history,monitoring]=await Promise.all([
       json('/api/state'),json(`/api/readings?hours=${$('range').value}`),json('/api/photos?limit=24'),
-      json('/api/growth'),json('/api/growth/history?limit=500'),json('/api/monitoring')
+      json('/api/growth'),json('/api/growth/history?limit=500'),json('/api/monitoring'),refreshFermentation()
     ]);
     renderMonitoring(monitoring);
     const reading=state.reading;
@@ -190,6 +204,22 @@ $('monitoring-button').addEventListener('click',async()=>{
   try{const current=await json('/api/monitoring');await json('/api/monitoring',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:!current.active})});await refresh();}
   catch(error){if(error.message!=='Sessió caducada')$('growth-detail').textContent=`No s’ha pogut canviar l’estat: ${error.message}`;}
   finally{button.disabled=false;}
+});
+
+$('fermentation-form').addEventListener('submit',async event=>{
+  event.preventDefault();const form=event.currentTarget;
+  try{await json('/api/fermentations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(formPayload(form))});form.reset();await refreshFermentation();}
+  catch(error){$('session-status').textContent=`No s’ha pogut iniciar: ${error.message}`;}
+});
+$('end-fermentation').addEventListener('click',async()=>{
+  if(!activeFermentation)return;
+  try{await json(`/api/fermentations/${activeFermentation.id}/end`,{method:'POST'});await refreshFermentation();}
+  catch(error){$('session-status').textContent=`No s’ha pogut finalitzar: ${error.message}`;}
+});
+$('event-form').addEventListener('submit',async event=>{
+  event.preventDefault();const form=event.currentTarget,feedback=$('event-feedback');
+  try{await json('/api/events',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(formPayload(form))});form.reset();feedback.textContent='Anotació desada amb l’hora actual.';}
+  catch(error){feedback.textContent=`No s’ha pogut desar: ${error.message}`;}
 });
 
 $('range').addEventListener('change',refresh);let timer;

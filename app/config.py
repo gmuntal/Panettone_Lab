@@ -10,6 +10,7 @@ class Settings:
     app_secret_key: str = os.getenv("APP_SECRET_KEY", "")
     auth_username: str = os.getenv("AUTH_USERNAME", "")
     auth_password: str = os.getenv("AUTH_PASSWORD", "")
+    readonly_api_token: str = os.getenv("READONLY_API_TOKEN", "")
     session_cookie_secure: bool = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
     shelly_url: str = os.getenv("SHELLY_URL", "http://10.85.3.202/rpc/Shelly.GetStatus")
     shelly_username: str = os.getenv("SHELLY_USERNAME", "")
@@ -31,5 +32,7 @@ def validate_settings() -> None:
         raise RuntimeError("APP_SECRET_KEY must be configured with at least 32 characters")
     if not settings.auth_username or not settings.auth_password:
         raise RuntimeError("AUTH_USERNAME and AUTH_PASSWORD must be configured")
+    if settings.readonly_api_token and len(settings.readonly_api_token) < 32:
+        raise RuntimeError("READONLY_API_TOKEN must have at least 32 characters when configured")
     if settings.sensor_interval_seconds < 5 or settings.photo_interval_seconds < 30:
         raise RuntimeError("Polling intervals are too short")

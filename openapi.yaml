@@ -1,0 +1,137 @@
+openapi: 3.1.0
+info:
+  title: Panettone Lab read-only API
+  version: 0.4.0
+  description: >-
+    API exclusivament de consulta. Les marques de temps de les respostes són UTC ISO 8601.
+    Les fotografies s'entreguen com a originals JPEG. Les credencials s'envien com a Bearer token.
+servers:
+  - url: http://raspberry-pi:8088
+security:
+  - ReadOnlyBearer: []
+paths:
+  /api/v1/status:
+    get:
+      summary: Estat de l'aplicació, monitoratge i darrera lectura/captura
+      responses:
+        '200': { description: Estat actual }
+        '401': { description: Credencial de només lectura absent o incorrecta }
+  /api/v1/readings:
+    get:
+      summary: Consulta lectures de temperatura i humitat
+      parameters:
+        - {$ref: '#/components/parameters/start'}
+        - {$ref: '#/components/parameters/end'}
+        - {$ref: '#/components/parameters/limit'}
+        - {$ref: '#/components/parameters/offset'}
+        - name: fermentation_id
+          in: query
+          schema: { type: integer }
+      responses:
+        '200': { description: Lectures paginades, incloent-hi errors de lectura }
+  /api/v1/photos:
+    get:
+      summary: Consulta una seqüència cronològica de captures
+      parameters:
+        - {$ref: '#/components/parameters/start'}
+        - {$ref: '#/components/parameters/end'}
+        - {$ref: '#/components/parameters/limit'}
+        - {$ref: '#/components/parameters/offset'}
+        - name: fermentation_id
+          in: query
+          schema: { type: integer }
+      responses:
+        '200': { description: Metadades cronològiques i enllaç a cada imatge original }
+  /api/v1/photos/{photo_id}:
+    get:
+      summary: Metadades d'una fotografia
+      parameters:
+        - {name: photo_id, in: path, required: true, schema: {type: integer}}
+      responses:
+        '200': {description: Metadades de captura i anàlisi}
+        '404': {description: Captura no trobada}
+  /api/v1/photos/{photo_id}/image:
+    get:
+      summary: Fotografia original JPEG
+      parameters:
+        - {name: photo_id, in: path, required: true, schema: {type: integer}}
+      responses:
+        '200': {description: Imatge original, sense recompressió, content: {image/jpeg: {schema: {type: string, format: binary}}}}
+        '404': {description: Fitxer no disponible}
+  /api/v1/events:
+    get:
+      summary: Consulta anotacions i esdeveniments registrats
+      parameters:
+        - {$ref: '#/components/parameters/start'}
+        - {$ref: '#/components/parameters/end'}
+        - {$ref: '#/components/parameters/limit'}
+        - {$ref: '#/components/parameters/offset'}
+        - name: fermentation_id
+          in: query
+          schema: {type: integer}
+      responses:
+        '200': {description: Esdeveniments paginats}
+  /api/v1/fermentations:
+    get:
+      summary: Llista fermentacions registrades
+      parameters:
+        - {$ref: '#/components/parameters/start'}
+        - {$ref: '#/components/parameters/end'}
+        - {$ref: '#/components/parameters/limit'}
+        - {$ref: '#/components/parameters/offset'}
+      responses:
+        '200': {description: Fermentacions paginades}
+  /api/v1/fermentations/{fermentation_id}:
+    get:
+      summary: Detalls i esdeveniments d'una fermentació
+      parameters:
+        - {name: fermentation_id, in: path, required: true, schema: {type: integer}}
+      responses:
+        '200': {description: Fermentació amb recomptes i esdeveniments}
+        '404': {description: Fermentació no trobada}
+  /api/v1/fermentations/{fermentation_id}/export:
+    get:
+      summary: Exporta una fermentació registrada en un ZIP
+      parameters:
+        - {name: fermentation_id, in: path, required: true, schema: {type: integer}}
+      responses:
+        '200': {description: ZIP amb la sessió, els esdeveniments i els JPEG originals, content: {application/zip: {schema: {type: string, format: binary}}}}
+        '404': {description: Fermentació no trobada}
+  /api/v1/export:
+    get:
+      summary: Exporta un interval complet en un ZIP
+      parameters:
+        - {$ref: '#/components/parameters/start'}
+        - {$ref: '#/components/parameters/end'}
+        - name: session_id
+          in: query
+          description: Identificador opcional inclòs a l'índex de fotos
+          schema: {type: string}
+      responses:
+        '200': {description: ZIP amb CSV, metadades i fotografies originals, content: {application/zip: {schema: {type: string, format: binary}}}}
+        '400': {description: Cal especificar start i end vàlids}
+components:
+  securitySchemes:
+    ReadOnlyBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: Token
+  parameters:
+    start:
+      name: start
+      in: query
+      description: Límit inicial inclòs; ISO 8601 amb zona horària.
+      schema: {type: string, format: date-time}
+    end:
+      name: end
+      in: query
+      description: Límit final exclòs; ISO 8601 amb zona horària.
+      schema: {type: string, format: date-time}
+    limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 1000, default: 200}
+    offset:
+      name: offset
+      in: query
+      schema: {type: integer, minimum: 0, default: 0}

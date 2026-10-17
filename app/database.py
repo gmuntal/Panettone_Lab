@@ -47,7 +47,47 @@ def init_db() -> None:
             active INTEGER NOT NULL DEFAULT 0,
             changed_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS fermentations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            starter_mass_g REAL,
+            flour_g REAL,
+            water_g REAL,
+            flour_type TEXT,
+            hydration_pct REAL,
+            initial_ph REAL,
+            initial_dough_temp_c REAL,
+            target_fermenter_temp_c REAL,
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_fermentations_started ON fermentations(started_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_fermentations_one_active
+            ON fermentations((1)) WHERE ended_at IS NULL;
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fermentation_id INTEGER REFERENCES fermentations(id),
+            occurred_at TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            starter_mass_g REAL,
+            flour_g REAL,
+            water_g REAL,
+            flour_type TEXT,
+            hydration_pct REAL,
+            ph REAL,
+            dough_temp_c REAL,
+            target_temp_c REAL,
+            details TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_events_occurred ON events(occurred_at);
+        CREATE INDEX IF NOT EXISTS idx_events_fermentation_time ON events(fermentation_id,occurred_at);
         """)
+        # Add nullable links in place. Existing readings and photographs remain untouched.
+        for table in ("readings", "photos"):
+            columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+            if "fermentation_id" not in columns:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN fermentation_id INTEGER REFERENCES fermentations(id)")
+            db.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_fermentation ON {table}(fermentation_id)")
         db.execute("INSERT OR IGNORE INTO monitoring_control(id,active,changed_at) VALUES(1,0,?)",
                    (utc_now(),))
 
@@ -79,17 +119,70 @@ def connect():
 
 def add_reading(temperature, humidity, error=None):
     with connect() as db:
-        db.execute("INSERT INTO readings(captured_at,temperature_c,humidity_rh,sensor_ok,error) VALUES(?,?,?,?,?)",
-                   (utc_now(), temperature, humidity, int(error is None), error))
+        session_id = active_fermentation_id(db)
+        db.execute("INSERT INTO readings(captured_at,temperature_c,humidity_rh,sensor_ok,error,fermentation_id) VALUES(?,?,?,?,?,?)",
+                   (utc_now(), temperature, humidity, int(error is None), error, session_id))
 
 
 def add_photo(filename, error=None, analysis=None):
     analysis = analysis or {}
     with connect() as db:
+        session_id = active_fermentation_id(db)
         db.execute("""INSERT INTO photos(captured_at,filename,growth_score,growth_detected,
-                   analysis_json,camera_ok,error) VALUES(?,?,?,?,?,?,?)""",
+                   analysis_json,camera_ok,error,fermentation_id) VALUES(?,?,?,?,?,?,?,?)""",
                    (utc_now(), filename, analysis.get("growth_score"), analysis.get("growth_detected"),
-                    analysis.get("analysis_json"), int(error is None), error))
+                    analysis.get("analysis_json"), int(error is None), error, session_id))
+
+
+def active_fermentation_id(db=None):
+    if db is not None:
+        row = db.execute("SELECT id FROM fermentations WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1").fetchone()
+        return row[0] if row else None
+    with connect() as connection:
+        return active_fermentation_id(connection)
+
+
+def start_fermentation(fields):
+    with connect() as db:
+        if active_fermentation_id(db) is not None:
+            raise ValueError("Ja hi ha una fermentació activa")
+        started_at = utc_now()
+        cursor = db.execute("""INSERT INTO fermentations(
+            started_at,starter_mass_g,flour_g,water_g,flour_type,hydration_pct,
+            initial_ph,initial_dough_temp_c,target_fermenter_temp_c,notes
+        ) VALUES(?,?,?,?,?,?,?,?,?,?)""", (
+            started_at, fields.get("starter_mass_g"), fields.get("flour_g"), fields.get("water_g"),
+            fields.get("flour_type"), fields.get("hydration_pct"), fields.get("initial_ph"),
+            fields.get("initial_dough_temp_c"), fields.get("target_fermenter_temp_c"), fields.get("notes")))
+        db.execute("INSERT INTO events(fermentation_id,occurred_at,event_type,details) VALUES(?,?,?,?)",
+                   (cursor.lastrowid, started_at, "fermentation_start", "Inici de fermentació"))
+        return dict(db.execute("SELECT * FROM fermentations WHERE id=?", (cursor.lastrowid,)).fetchone())
+
+
+def end_fermentation(fermentation_id):
+    with connect() as db:
+        ended_at = utc_now()
+        updated = db.execute("UPDATE fermentations SET ended_at=? WHERE id=? AND ended_at IS NULL",
+                             (ended_at, fermentation_id))
+        if updated.rowcount:
+            db.execute("INSERT INTO events(fermentation_id,occurred_at,event_type,details) VALUES(?,?,?,?)",
+                       (fermentation_id, ended_at, "fermentation_end", "Final de fermentació"))
+        row = db.execute("SELECT * FROM fermentations WHERE id=?", (fermentation_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def add_event(fields):
+    with connect() as db:
+        fermentation_id = fields.get("fermentation_id") or active_fermentation_id(db)
+        cursor = db.execute("""INSERT INTO events(
+            fermentation_id,occurred_at,event_type,starter_mass_g,flour_g,water_g,flour_type,
+            hydration_pct,ph,dough_temp_c,target_temp_c,details
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            fermentation_id, utc_now(), fields["event_type"], fields.get("starter_mass_g"),
+            fields.get("flour_g"), fields.get("water_g"), fields.get("flour_type"),
+            fields.get("hydration_pct"), fields.get("ph"), fields.get("dough_temp_c"),
+            fields.get("target_temp_c"), fields.get("details")))
+        return dict(db.execute("SELECT * FROM events WHERE id=?", (cursor.lastrowid,)).fetchone())
 
 
 def growth_config():

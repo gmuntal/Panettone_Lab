@@ -4,6 +4,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 data/
+exports/
+**/.DS_Store
 *.db
 *.db-shm
 *.db-wal

@@ -1,4 +1,4 @@
-# Panettone Lab v0.3.4
+# Panettone Lab v0.4.0
 
 PWA local en català per observar la fermentació del lievito madre. El servei és autònom i no depèn de Cuinetes: parla directament amb la Tapo C210 i el Shelly Plus UNI a la xarxa local.
 
@@ -15,7 +15,7 @@ GitHub Actions --> GHCR (amd64 + arm64) --> Portainer Stack des d'aquest reposit
 - Un contenidor i un procés Gunicorn amb un worker: els treballs periòdics s’executen una sola vegada.
 - Fotografia cada 120 segons; temperatura i humitat cada 30 segons.
 - El seguiment es pot iniciar i aturar des del dashboard. Aturat, no es fan lectures ni es capturen fotos; l’estat es conserva a SQLite i també després de reiniciar el contenidor. En una instal·lació nova queda aturat fins que s’inicia manualment.
-- Base SQLite, fotografies i estat preparats dins d’un volum persistent.
+- Base SQLite, fotografies i estat preparats dins d’un volum persistent. A l'actualització a v0.4.0 s'afegeixen taules i enllaços opcionals amb `ALTER TABLE` només quan falten; cap lectura/foto antiga no s'esborra ni es reescriu. Fes còpia del volum abans d'actualitzar.
 - L’anàlisi visual estima l’alçada de la massa dins una zona del pot que es pot calibrar des del dashboard. Es pot marcar un nivell inicial i seguir-ne la variació al llarg del temps. És una estimació d’alçada visible, no del pes ni del volum real.
 - En obrir «Configura la zona del pot», es captura una imatge actual i se’n prova la detecció provisional amb la zona seleccionada; no s’afegeix a l’historial de fotografies. Es pot repetir la prova després d’ajustar el rectangle.
 - Els fotogrames sense una transició prou clara es desen sense mesura. La càmera i el pot han de quedar fixos; cal revisar la zona calibrada després de moure’ls.
@@ -45,9 +45,10 @@ En producció amb HTTPS, defineix `SESSION_COOKIE_SECURE=true`. Mantén el serve
 3. Publica la imatge del paquet GHCR per permetre a la Raspberry Pi descarregar-la; si és privada, crea un registry credential a Portainer.
 4. A Portainer crea una Stack des del repositori GitHub, branca `main`, compose path `docker-compose.yml`; activa GitOps/polling segons la política d’actualització desitjada i configura «re-pull image» en redeploy perquè recarregui `latest`.
 5. Afegeix a la configuració de variables d’entorn de la Stack `APP_SECRET_KEY`, `AUTH_USERNAME` i `AUTH_PASSWORD` (obligatòries); introdueix-hi també les credencials de dispositius si en fas servir. No pugis `.env` ni secrets a Git. Ajusta `GHCR_IMAGE` al camí real del paquet. Per a `docker compose` local, copia `.env.example` a `.env`.
-6. Portainer crea el volum `panettone_lab_data`. Abans d’actualitzar, mantén còpia de seguretat d’aquest volum; un deploy de Stack no l’esborra.
+6. Per activar les consultes externes de només lectura, crea un token llarg i aleatori i desa'l com a `READONLY_API_TOKEN` a Portainer. Si el deixes buit, l'API v1 respon amb 401. El token és independent del login web i no permet canviar el monitoratge ni controlar dispositius.
+7. Portainer crea el volum `panettone_lab_data`. Abans d’actualitzar, mantén còpia de seguretat d’aquest volum; un deploy de Stack no l’esborra.
 
-Per a un deploy reproduïble, canvia `IMAGE_TAG` a un tag semàntic (`v0.3.0`, per exemple) i fes que el commit de GitOps apunti a aquell tag. `latest` simplifica la primera instal·lació però és mutable.
+Per a un deploy reproduïble, canvia `IMAGE_TAG` a un tag semàntic (`v0.4.0`, per exemple) i fes que el commit de GitOps apunti a aquell tag. `latest` simplifica la primera instal·lació però és mutable.
 
 ## Configuració
 
@@ -62,14 +63,21 @@ Per a un deploy reproduïble, canvia `IMAGE_TAG` a un tag semàntic (`v0.3.0`, p
 | `PHOTO_INTERVAL_SECONDS` | `120` | Període de captura |
 | `AUTH_USERNAME`, `AUTH_PASSWORD` | obligatori | Protecció del dashboard |
 | `APP_SECRET_KEY` | obligatori | Signatura de sessió, mínim 32 caràcters |
+| `READONLY_API_TOKEN` | buit | Token Bearer independent de només lectura; buit desactiva `/api/v1` |
 | `SESSION_COOKIE_SECURE` | `false` | Activa-ho darrere d’HTTPS |
 | `CONTAINER_PLATFORM` | `linux/arm64` | Plataforma d’imatge; Pi 4 per defecte, usa `linux/amd64` en un host Intel/AMD |
 
-## Dades i API
+## Sessions, esdeveniments, exportació i API
 
 - `GET /healthz`: estat del procés, sense autenticació, per healthcheck Docker.
 - `GET /api/state`, `/api/readings?hours=24`, `/api/photos?limit=48`: requereixen sessió autenticada.
 - `GET /photos/<fitxer>` també requereix sessió.
+- El bloc «Sessions i anotacions» permet iniciar/finalitzar una fermentació i registrar refrescos (massa mare, farina, aigua i farina), pH, temperatura de massa, entrada/sortida de nevera, consignes, observacions i incidències. Les captures noves s'associen a la sessió activa; les històriques no s'alteren.
+- Les rutes de `/api/sessions` són una compatibilitat anterior que infereix finestres a partir de buits de dades. Per a fermentacions reals usa `/api/v1/fermentations`.
+- `GET /api/v1/status`, `/readings`, `/photos`, `/photos/{id}`, `/photos/{id}/image`, `/events`, `/fermentations`, `/fermentations/{id}`, `/fermentations/{id}/export` i `/export` són de només lectura i requereixen `Authorization: Bearer <READONLY_API_TOKEN>`. Les rutes `/readings`, `/photos` i `/events` accepten `start`, `end` (ISO 8601 amb zona horària), `limit`, `offset`; lectures/fotos/esdeveniments també accepten `fermentation_id`. L'exportació requereix inici i final i retorna CSV, metadades i JPEG originals. L'API limita a 120 peticions/minut per IP.
+- L'especificació està a [openapi.yaml](openapi.yaml). `/api/v1/export?start=2026-10-16T20:00:00%2B02:00&end=2026-10-17T09:00:00%2B02:00` permet baixar un interval concret amb el token configurat.
+- Les lectures anteriors a una sessió explícita resten sense sessió associada; no s'assignen retrospectivament per preservar els fets registrats.
+- Per analitzar ara les dades des de qualsevol conversa, adjunta el ZIP exportat. ChatGPT no pot consultar una API REST privada només perquè existeixi. Per a consulta directa cal un adaptador MCP de només lectura i un Secure MCP Tunnel cap a aquesta xarxa privada, configurats dins d'un espai/compte ChatGPT compatible. El túnel necessita credencials de plataforma i manté una connexió sortint cap a OpenAI; no s'ha iniciat ni configurat en aquest canvi. No cal obrir ports del router ni exposar la càmera o SQLite.
 - El volum `panettone_lab_data` conté `panettone.db` i `photos/`.
 
 Les fallades de dispositius es desen com a mostres d’estat amb l’error i no aturen els altres cicles. Els intervals parteixen en iniciar el contenidor i tornen a començar després d’un reinici.
@@ -80,4 +88,4 @@ Les fallades de dispositius es desen com a mostres d’estat amb l’error i no 
 python -m unittest discover -s tests -v
 ```
 
-Les comprovacions automatitzades cobreixen login, API, lectura de valors Shelly amb resposta simulada i detecció del canvi de nivell amb perfils sintètics. La validació d’RTSP/Shelly i l’ajust final de la zona de creixement requereixen desplegar en la LAN on són els dispositius.
+Les comprovacions automatitzades cobreixen exportació ZIP i creixement. L'API web també té proves d'integració quan Flask i requests són instal·lats; la validació d’RTSP/Shelly i l’ajust final de la zona de creixement requereixen la LAN dels dispositius. Abans d'actualitzar la Raspberry, executa les proves completes i fes una còpia de seguretat del volum.

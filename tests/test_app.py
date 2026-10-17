@@ -10,13 +10,18 @@ class AppTests(unittest.TestCase):
         os.environ["APP_SECRET_KEY"] = "test-secret-key-with-at-least-32-characters"
         os.environ["AUTH_USERNAME"] = "tester"
         os.environ["AUTH_PASSWORD"] = "correct-horse-battery-staple"
+        os.environ["READONLY_API_TOKEN"] = "read-only-token-with-enough-entropy-for-tests"
         os.environ["DATA_DIR"] = self.temp.name
         os.environ["DATABASE_PATH"] = os.path.join(self.temp.name, "test.db")
         os.environ["PHOTO_DIR"] = os.path.join(self.temp.name, "photos")
         from app.config import Settings
         from app import config, database
-        config.settings = Settings()
+        config.settings = Settings(data_dir=self.temp.name,
+                                   database_path=os.path.join(self.temp.name, "test.db"),
+                                   photo_dir=os.path.join(self.temp.name, "photos"))
         database.settings = config.settings
+        from app import main
+        main.settings = config.settings
         from app.main import create_app
         self.app = create_app(start_background=False)
         self.client = self.app.test_client()
@@ -82,6 +87,75 @@ class AppTests(unittest.TestCase):
         invalid = self.client.post("/api/growth/roi", json={"x0": 0.7, "y0": 0.2, "x1": 0.3, "y1": 0.9})
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(self.client.post("/api/growth/calibrate", json={}).status_code, 409)
+
+    def test_session_export_endpoints_reuse_login(self):
+        self.assertEqual(self.client.get("/api/sessions").status_code, 401)
+        self.client.post("/login", data={"username": "tester", "password": "correct-horse-battery-staple"})
+        from app.database import add_photo, add_reading
+        filename = "20261017-120000.jpg"
+        with open(os.path.join(self.temp.name, "photos", filename), "wb") as image:
+            image.write(b"original-jpeg")
+        add_reading(25.2, 61.0)
+        add_photo(filename)
+
+        sessions = self.client.get("/api/sessions")
+        self.assertEqual(sessions.status_code, 200)
+        session = sessions.json["sessions"][0]
+        self.assertTrue(session["inferred"])
+        self.assertEqual(len(self.client.get(f"/api/sessions/{session['id']}/readings").json), 1)
+        photos = self.client.get(f"/api/sessions/{session['id']}/photos")
+        self.assertEqual(photos.status_code, 200)
+        self.assertEqual(photos.json[0]["photo_url"], f"/photos/{filename}")
+        exported = self.client.get(f"/api/sessions/{session['id']}/export")
+        self.assertEqual(exported.status_code, 200)
+        self.assertEqual(exported.mimetype, "application/zip")
+        self.assertIn("attachment;", exported.headers["Content-Disposition"])
+        self.assertEqual(self.client.get("/api/sessions/not-a-session/readings").status_code, 404)
+
+    def test_fermentation_records_link_new_observations_and_read_api_is_independent(self):
+        self.assertEqual(self.client.get("/api/v1/status").status_code, 401)
+        self.client.post("/login", data={"username": "tester", "password": "correct-horse-battery-staple"})
+        started = self.client.post("/api/fermentations", json={
+            "starter_mass_g": "100", "flour_g": "100", "water_g": "50",
+            "flour_type": "Manitoba", "hydration_pct": "50", "initial_ph": "4.2",
+            "initial_dough_temp_c": "25.5", "target_fermenter_temp_c": "27"})
+        self.assertEqual(started.status_code, 201)
+        fermentation_id = started.json["id"]
+        from app.database import start_fermentation
+        with self.assertRaises(ValueError):
+            start_fermentation({})
+
+        from app.database import add_photo, add_reading
+        filename = "test-fermentation.jpg"
+        with open(os.path.join(self.temp.name, "photos", filename), "wb") as image:
+            image.write(b"original-jpeg")
+        add_reading(26.1, 62.0)
+        add_photo(filename)
+        event = self.client.post("/api/events", json={"event_type": "refresh", "starter_mass_g": 100,
+                                                       "flour_g": 100, "water_g": 50,
+                                                       "ph": 4.0, "details": "Refresc manual"})
+        self.assertEqual(event.status_code, 201)
+        token_headers = {"Authorization": "Bearer read-only-token-with-enough-entropy-for-tests"}
+        self.assertEqual(self.client.get("/api/v1/status").status_code, 401)
+        readings = self.client.get(f"/api/v1/readings?fermentation_id={fermentation_id}", headers=token_headers)
+        photos = self.client.get(f"/api/v1/photos?fermentation_id={fermentation_id}", headers=token_headers)
+        events = self.client.get(f"/api/v1/events?fermentation_id={fermentation_id}", headers=token_headers)
+        self.assertEqual(readings.status_code, 200)
+        self.assertEqual(readings.json["items"][0]["fermentation_id"], fermentation_id)
+        self.assertEqual(photos.json["items"][0]["fermentation_id"], fermentation_id)
+        self.assertGreaterEqual(len(events.json["items"]), 2)
+        photo_id = photos.json["items"][0]["id"]
+        self.assertEqual(self.client.get(f"/api/v1/photos/{photo_id}/image", headers=token_headers).data, b"original-jpeg")
+        self.assertEqual(self.client.post("/api/v1/events", headers=token_headers, json={}).status_code, 405)
+
+        ended = self.client.post(f"/api/fermentations/{fermentation_id}/end")
+        self.assertEqual(ended.status_code, 200)
+        self.assertIsNotNone(ended.json["ended_at"])
+        detail = self.client.get(f"/api/v1/fermentations/{fermentation_id}", headers=token_headers)
+        self.assertEqual(detail.json["counts"]["readings"], 1)
+        exported = self.client.get(f"/api/v1/fermentations/{fermentation_id}/export", headers=token_headers)
+        self.assertEqual(exported.status_code, 200)
+        self.assertEqual(exported.mimetype, "application/zip")
 
 
 class DeviceTests(unittest.TestCase):
