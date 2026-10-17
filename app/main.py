@@ -26,7 +26,7 @@ from .growth_detection import analyze_image
 from .scheduler import start_workers
 from .fermenter import get_state as get_fermenter_state, history as fermenter_history, update_settings as update_fermenter_settings
 
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.6.0"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -144,7 +144,7 @@ def create_app(start_background=False):
 
     @app.get("/login")
     def login():
-        return render_template("login.html", error=None)
+        return render_template("login.html", error=None, app_version=APP_VERSION)
 
     @app.post("/login")
     def login_post():
@@ -157,7 +157,7 @@ def create_app(start_background=False):
             if not destination.startswith("/") or destination.startswith("//"):
                 destination = "/"
             return redirect(destination)
-        return render_template("login.html", error="Usuari o contrasenya incorrectes"), 401
+        return render_template("login.html", error="Usuari o contrasenya incorrectes", app_version=APP_VERSION), 401
 
     @app.post("/logout")
     def logout():
@@ -170,18 +170,21 @@ def create_app(start_background=False):
 
     @app.get("/manifest.webmanifest")
     def manifest():
-        return send_from_directory(app.static_folder, "manifest.webmanifest", mimetype="application/manifest+json")
+        response = send_from_directory(app.static_folder, "manifest.webmanifest", mimetype="application/manifest+json")
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
 
     @app.get("/service-worker.js")
     def service_worker():
         response = send_from_directory(app.static_folder, "service-worker.js", mimetype="application/javascript")
         response.headers["Service-Worker-Allowed"] = "/"
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return response
 
     @app.get("/")
     @login_required
     def dashboard():
-        return render_template("dashboard.html")
+        return render_template("dashboard.html", app_version=APP_VERSION)
 
     @app.get("/api/state")
     @login_required

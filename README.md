@@ -1,4 +1,4 @@
-# Panettone Lab v0.5.0
+# Panettone Lab v0.6.0
 
 PWA local en català per observar la fermentació del lievito madre. El servei és autònom i no depèn de Cuinetes: parla directament amb la Tapo C210 i el Shelly Plus UNI a la xarxa local.
 
@@ -21,6 +21,7 @@ GitHub Actions --> GHCR (amd64 + arm64) --> Portainer Stack des d'aquest reposit
 - Els fotogrames sense una transició prou clara es desen sense mesura. La càmera i el pot han de quedar fixos; cal revisar la zona calibrada després de moure’ls.
 - Pillow redimensiona les captures abans de l’anàlisi per mantenir baix el cost de CPU a la Raspberry Pi.
 - El service worker desa només l’esquelet estàtic. Dades, captures i sessió requereixen connexió i autenticació.
+- **Logotip i icones v0.6.0:** màster oficial a `app/static/icons/logo-original.png`; icones PWA, Apple, favicon i versió maskable a `app/static/icons/`. Els enllaços porten versió i el service worker substitueix la memòria cau antiga en activar-se.
 - **Control de fermentadora v0.5.0 en simulació:** llegeix el DHT22 i l’estat de les dues sortides del Shelly cada 5 s; mostra temperatura, consigna, mode, programa horari, demandes simulades, gràfica i alarmes. El control automàtic fa servir histèresi, límit de temps ON, temps mínim entre canvis, detecció de lectures invàlides i tall virtual per sobretemperatura. La configuració i el registre s’afegeixen a SQLite sense reescriure les dades antigues.
 - **No acciona la resistència.** Els modes Automàtic i Manual són simulacions; cap ruta d’API no envia una ordre de canvi d’estat al Shelly. Després de reiniciar, el simulador torna a Aturat. No activar control real fins a identificar el canal i validar cablejat, relé/contactor, tall tèrmic físic i un watchdog local independent. Vegeu [l’auditoria de la fermentadora](docs/fermenter-audit.md).
 
@@ -50,7 +51,7 @@ En producció amb HTTPS, defineix `SESSION_COOKIE_SECURE=true`. Mantén el serve
 6. Per activar les consultes externes de només lectura, crea un token llarg i aleatori i desa'l com a `READONLY_API_TOKEN` a Portainer. Si el deixes buit, l'API v1 respon amb 401. El token és independent del login web i no permet canviar el monitoratge ni controlar dispositius.
 7. Portainer crea el volum `panettone_lab_data`. Abans d’actualitzar, mantén còpia de seguretat d’aquest volum; un deploy de Stack no l’esborra.
 
-Per a un deploy reproduïble, canvia `IMAGE_TAG` a un tag semàntic (`v0.5.0`, per exemple) i fes que el commit de GitOps apunti a aquell tag. `latest` simplifica la primera instal·lació però és mutable.
+Per a un deploy reproduïble, canvia `IMAGE_TAG` a un tag semàntic (`v0.6.0`, per exemple) i fes que el commit de GitOps apunti a aquell tag. `latest` simplifica la primera instal·lació però és mutable.
 
 Amb `latest`, GitOps pot detectar un commit abans que GitHub Actions acabi de publicar la imatge corresponent. Comprova que el workflow «Build and publish container» ha acabat correctament abans de forçar un redeploy amb «re-pull image»; si el redeploy s’ha avançat, torna’l a executar quan la publicació sigui verda. Amb tags immutables, actualitza `IMAGE_TAG` després que el tag s’hagi publicat.
 
