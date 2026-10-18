@@ -27,7 +27,7 @@ from .growth_detection import analyze_image, growth_from_surface
 from .scheduler import start_workers
 from .fermenter import get_state as get_fermenter_state, history as fermenter_history, update_settings as update_fermenter_settings
 
-APP_VERSION = "0.8.2"
+APP_VERSION = "0.9.0"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -47,6 +47,8 @@ def create_app(start_background=False):
         if request.path.startswith("/api/v1/"):
             log.info("readonly_api method=%s path=%s status=%s remote=%s",
                      request.method, request.path, response.status_code, request.remote_addr or "unknown")
+            response.headers["Cache-Control"] = "no-store"
+        if request.path == "/api/growth/sequence":
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -586,6 +588,16 @@ def create_app(start_background=False):
         response.headers["X-Panettone-Photos"] = str(metadata["counts"]["photo_files_exported"])
         return response
 
+    @app.get("/api/growth/sequence")
+    @login_required
+    def growth_sequence():
+        from .growth_analysis import sequence
+        fermentation_id=request.args.get('fermentation_id',type=int)
+        reference_id=request.args.get('reference_id',type=int)
+        if fermentation_id is None or ('reference_id' in request.args and reference_id is None):return jsonify(error='Cal seleccionar una fermentació i una referència vàlides.'),400
+        try:return jsonify(sequence(fermentation_id,reference_id,enqueue=app.config.get("VISUAL_ANALYSIS_BACKGROUND",True)))
+        except ValueError as error:return jsonify(error=str(error)),404
+
     @app.get("/api/growth")
     @login_required
     def growth():
@@ -645,9 +657,9 @@ def create_app(start_background=False):
             abort(400)
         if (any(not 0 <= value <= 1 for value in guides.values()) or
                 guides["right_x"] - guides["left_x"] < 0.04 or
-                guides["bottom_y"] - guides["initial_surface_y"] < 0.12):
+                guides["bottom_y"] - guides["initial_surface_y"] < 0.02):
             return jsonify({"error": "Les línies no delimiten una alçada inicial vàlida."}), 400
-        photo = next(iter(read_rows("SELECT id,captured_at,filename,camera_ok FROM photos WHERE id=?", (photo_id,))), None)
+        photo = next(iter(read_rows("SELECT id,captured_at,filename,camera_ok,fermentation_id FROM photos WHERE id=?", (photo_id,))), None)
         if not photo or not photo["camera_ok"] or not photo["filename"]:
             return jsonify({"error": "La fotografia de referència ja no està disponible."}), 404
         initial_height = guides["bottom_y"] - guides["initial_surface_y"]
@@ -661,6 +673,8 @@ def create_app(start_background=False):
         calibration = {**guides, "photo_id": photo_id, "captured_at": photo["captured_at"],
                        "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         save_growth_calibration(calibration)
+        from .growth_analysis import save
+        save(calibration,photo["fermentation_id"])
         # Re-seed the detector with a frame processed under the new ROI. This
         # avoids comparing coordinates produced with the previous crop.
         seed_photo = latest_analyzed_photo()
@@ -679,6 +693,13 @@ def create_app(start_background=False):
     @app.delete("/api/growth/calibration")
     @login_required
     def growth_calibration_reset():
+        from .growth_analysis import reset
+        requested=request.args.get('fermentation_id',type=int)
+        if requested is None:
+            old=growth_config().get('calibration')
+            row=next(iter(read_rows('SELECT fermentation_id FROM photos WHERE id=?',(old['photo_id'],))),None) if old else None
+            requested=row['fermentation_id'] if row else None
+        reset(requested)
         clear_growth_calibration()
         return jsonify({"calibration": None})
 

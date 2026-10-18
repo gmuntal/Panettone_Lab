@@ -1,6 +1,6 @@
-# Panettone Lab v0.8.2
+# Panettone Lab v0.9.0
 
-v0.8.2 corregeix l’estabilitat del calibratge i la fotografia inicial, i reorganitza els controls de càmera. L’auditoria i el pla de v0.7.0 són a [docs/redisseny-i-auditoria-2026-10-18.md](docs/redisseny-i-auditoria-2026-10-18.md).
+v0.9.0 unifica la comparació i el timelapse, millora la detecció infraroja i afegeix estimacions persistents per calibratge. Resultats i límits de la validació real: [anàlisi visual](docs/visual-growth-v090.md).
 
 PWA local en català per observar la fermentació del lievito madre. El servei és autònom i no depèn de Cuinetes: parla directament amb la Tapo C210 i el Shelly Plus UNI a la xarxa local.
 
@@ -19,7 +19,7 @@ GitHub Actions --> GHCR (amd64 + arm64) --> Portainer Stack des d'aquest reposit
 - El seguiment es pot iniciar i aturar des del dashboard. Aturat, no es fan lectures ni es capturen fotos; l’estat es conserva a SQLite i també després de reiniciar el contenidor. En una instal·lació nova queda aturat fins que s’inicia manualment.
 - Base SQLite, fotografies i estat preparats dins d’un volum persistent. A l'actualització a v0.4.0 s'afegeixen taules i enllaços opcionals amb `ALTER TABLE` només quan falten; cap lectura/foto antiga no s'esborra ni es reescriu. Fes còpia del volum abans d'actualitzar.
 - L’anàlisi visual estima l’alçada de la massa dins una zona del pot que es pot calibrar des del dashboard. Es pot marcar un nivell inicial i seguir-ne la variació al llarg del temps. És una estimació d’alçada visible, no del pes ni del volum real.
-- **Càmera v0.8.2:** els ajustos locals no són sobreescrits pel refresc periòdic; el calibratge es verifica després de desar-lo, i la referència inicial s’estabilitza i es pot inicialitzar des de la primera captura posterior a l’inici de la fermentació.
+- **Càmera v0.9.0:** els ajustos locals no són sobreescrits pel refresc periòdic; el calibratge es verifica després de desar-lo, i la referència inicial s’estabilitza i es pot inicialitzar des de la primera captura posterior a l’inici de la fermentació.
 - En obrir «Configura la zona del pot», es captura una imatge actual i se’n prova la detecció provisional amb la zona seleccionada; no s’afegeix a l’historial de fotografies. Es pot repetir la prova després d’ajustar el rectangle.
 - Els fotogrames sense una transició prou clara es desen sense mesura. La càmera i el pot han de quedar fixos; cal revisar la zona calibrada després de moure’ls.
 - Pillow redimensiona les captures abans de l’anàlisi per mantenir baix el cost de CPU a la Raspberry Pi.

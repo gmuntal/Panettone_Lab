@@ -135,6 +135,8 @@ def init_db() -> None:
                    (utc_now(),))
         db.execute("INSERT OR IGNORE INTO fermenter_settings(id,updated_at) VALUES(1,?)", (utc_now(),))
         db.execute("INSERT OR IGNORE INTO fermenter_runtime(id) VALUES(1)")
+    from .growth_analysis import initialize
+    initialize()
 
 
 def monitoring_state():
