@@ -1,17 +1,23 @@
 import unittest
 
-from app.growth_detection import DEFAULT_ROI, estimate_surface, growth_from_surface
+from app.growth_detection import (DEFAULT_ROI, estimate_surface,
+                                  growth_from_surface, reproject_surface_ratio)
 
 
 class GrowthDetectionTests(unittest.TestCase):
     def test_growth_percent_is_relative_to_the_initial_height(self):
         self.assertEqual(growth_from_surface(.95, .75, .75), {"factor": 1.0, "percent": 0.0})
+        self.assertEqual(growth_from_surface(.95, .75, .65), {"factor": 1.5, "percent": 50.0})
         self.assertEqual(growth_from_surface(.95, .75, .55), {"factor": 2.0, "percent": 100.0})
         self.assertEqual(growth_from_surface(.95, .75, .35), {"factor": 3.0, "percent": 200.0})
 
     def test_growth_rejects_invalid_guides(self):
         self.assertIsNone(growth_from_surface(.5, .7, .6))
         self.assertIsNone(growth_from_surface(.9, .8, 1.2))
+
+    def test_previous_surface_can_be_reprojected_after_roi_changes(self):
+        self.assertAlmostEqual(reproject_surface_ratio(.70, {"y0": .2, "y1": .95}), .3333, places=3)
+        self.assertIsNone(reproject_surface_ratio(.1, {"y0": .2, "y1": .95}))
 
     def test_detects_sustained_dark_to_bright_surface(self):
         profile = [0.08] * 90 + [0.88] * 70

@@ -27,7 +27,7 @@ from .growth_detection import analyze_image, growth_from_surface
 from .scheduler import start_workers
 from .fermenter import get_state as get_fermenter_state, history as fermenter_history, update_settings as update_fermenter_settings
 
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.8.1"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -650,9 +650,28 @@ def create_app(start_background=False):
         photo = next(iter(read_rows("SELECT id,captured_at,filename,camera_ok FROM photos WHERE id=?", (photo_id,))), None)
         if not photo or not photo["camera_ok"] or not photo["filename"]:
             return jsonify({"error": "La fotografia de referència ja no està disponible."}), 404
-        save_growth_roi({"x0": guides["left_x"], "y0": guides["initial_surface_y"],
-                         "x1": guides["right_x"], "y1": guides["bottom_y"]})
+        initial_height = guides["bottom_y"] - guides["initial_surface_y"]
+        # Keep enough headroom above the starting surface to detect later
+        # expansion; starting the detector at the baseline makes growth
+        # physically invisible once the dough rises above that line.
+        detector_top = max(0.0, guides["bottom_y"] - 6 * initial_height)
+        roi = {"x0": guides["left_x"], "y0": detector_top,
+               "x1": guides["right_x"], "y1": guides["bottom_y"]}
+        save_growth_roi(roi)
         save_growth_calibration({**guides, "photo_id": photo_id, "captured_at": photo["captured_at"]})
+        # Re-seed the detector with a frame processed under the new ROI. This
+        # avoids comparing coordinates produced with the previous crop.
+        seed_photo = latest_analyzed_photo()
+        if seed_photo and seed_photo.get("filename"):
+            seed_path = os.path.join(settings.photo_dir, seed_photo["filename"])
+        else:
+            seed_photo = photo
+            seed_path = os.path.join(settings.photo_dir, photo["filename"])
+        if os.path.isfile(seed_path):
+            try:
+                update_photo_analysis(seed_photo["id"], analyze_image(seed_path, roi))
+            except Exception:
+                log.exception("No s’ha pogut recalcular la darrera detecció amb la nova zona")
         return jsonify({"calibration": growth_config().get("calibration"), "photo": photo})
 
     @app.delete("/api/growth/calibration")

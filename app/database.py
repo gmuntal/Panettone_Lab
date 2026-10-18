@@ -324,7 +324,7 @@ def growth_history(limit=500):
     with connect() as db:
         return [dict(row) for row in db.execute(
             """SELECT id,captured_at,filename,growth_score,growth_detected,analysis_json
-               FROM photos WHERE camera_ok=1 AND growth_score IS NOT NULL
+               FROM photos
                ORDER BY captured_at DESC LIMIT ?""", (int(limit),))]
 
 

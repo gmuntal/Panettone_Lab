@@ -132,7 +132,17 @@ function drawGrowthChart(rows) {
   canvas.width=box.width*dpr;canvas.height=box.height*dpr;
   const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
   const w=box.width,h=box.height,p={l:38,r:10,t:14,b:25};
-  const valid=rows.filter(row=>inCameraRange(row.captured_at)).map(row=>{let a={};try{a=JSON.parse(row.analysis_json||'{}')}catch{};if(!a.valid||!growthCalibration)return null;const base=growthCalibration.bottom_y-growthCalibration.initial_surface_y,cur=growthCalibration.bottom_y-a.surface_y_ratio;return base>0&&cur>0?{...row,growth_score:(cur/base-1)*100}:null;}).filter(Boolean).reverse();
+  const startAt=growthCalibration?.captured_at?new Date(growthCalibration.captured_at).getTime():null;
+  const series=rows.filter(row=>inCameraRange(row.captured_at)&&(!startAt||new Date(row.captured_at).getTime()>=startAt)).slice().reverse().map(row=>{
+    let analysis={};try{analysis=JSON.parse(row.analysis_json||'{}')}catch{}
+    if(!growthCalibration||!analysis.valid||!Number.isFinite(analysis.surface_y_ratio))return {...row,growth_score:null};
+    const base=growthCalibration.bottom_y-growthCalibration.initial_surface_y;
+    const current=growthCalibration.bottom_y-analysis.surface_y_ratio;
+    if(base<=0||current<=0)return {...row,growth_score:null};
+    const isReference=String(row.id)===String(growthCalibration.photo_id);
+    return {...row,growth_score:isReference?0:(current/base-1)*100};
+  });
+  const valid=series.filter(row=>Number.isFinite(row.growth_score));
   $('growth-empty').style.display=valid.length?'none':'grid';if(!valid.length)return;
   const vals=valid.map(row=>row.growth_score),min=Math.floor(Math.min(...vals)-10),max=Math.ceil(Math.max(...vals)+10);
   const range=Math.max(20,max-min),low=min,high=min+range;
@@ -140,7 +150,8 @@ function drawGrowthChart(rows) {
   for(let i=0;i<4;i++){const ratio=i/3,y=p.t+(h-p.t-p.b)*ratio;ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();ctx.fillText(`${Math.round(high-(high-low)*ratio)}%`,0,y+3)}
   ctx.strokeStyle='#4a9878';ctx.lineWidth=2;ctx.lineJoin='round';ctx.beginPath();
   const start=cameraRangeStart??new Date(valid[0].captured_at).getTime(),end=cameraRangeEnd??new Date(valid.at(-1).captured_at).getTime(),span=Math.max(1,end-start);
-  valid.forEach((row,i)=>{const x=p.l+(w-p.l-p.r)*(new Date(row.captured_at).getTime()-start)/span,y=p.t+(h-p.t-p.b)*(1-(row.growth_score-low)/(high-low||1));if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});ctx.stroke();
+  let penDown=false;
+  series.forEach(row=>{if(!Number.isFinite(row.growth_score)){penDown=false;return;}const x=p.l+(w-p.l-p.r)*(new Date(row.captured_at).getTime()-start)/span,y=p.t+(h-p.t-p.b)*(1-(row.growth_score-low)/(high-low||1));if(!penDown){ctx.moveTo(x,y);penDown=true;}else ctx.lineTo(x,y);});ctx.stroke();
   const first=new Date(valid[0].captured_at),last=new Date(valid.at(-1).captured_at);ctx.fillStyle='#9aa69f';
   ctx.fillText(new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(start)),p.l,h-4);
   ctx.fillText(new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(end)),Math.max(p.l,w-p.r-35),h-4);
@@ -149,6 +160,8 @@ function drawGrowthChart(rows) {
 function inCameraRange(value){const time=new Date(value).getTime();return (!cameraRangeStart||time>=cameraRangeStart)&&(!cameraRangeEnd||time<=cameraRangeEnd);}
 function growthFor(photo){
   if(!photo||!growthCalibration)return null;
+  if(growthCalibration.captured_at&&new Date(photo.captured_at)<new Date(growthCalibration.captured_at))return null;
+  if(String(photo.id)===String(growthCalibration.photo_id))return {factor:1,percent:0,confidence:1,surface:growthCalibration.initial_surface_y};
   let analysis={};try{analysis=JSON.parse(photo.analysis_json||'{}')}catch{}
   if(!analysis.valid||!Number.isFinite(analysis.surface_y_ratio))return null;
   const initial=growthCalibration.bottom_y-growthCalibration.initial_surface_y;
@@ -167,8 +180,8 @@ function renderGrowth(data){
   $('comparison-growth').textContent=result?`Creixement estimat ${result.percent>=0?'+':''}${result.percent.toFixed(0)}% · ×${result.factor.toFixed(2)} · confiança ${Math.round(result.confidence*100)}%`:'Calibratge necessari / no es pot estimar';
   $('current-surface-line').hidden=!result;
   if(result)$('current-surface-line').style.top=`${result.surface*100}%`;
-  $('baseline-button').disabled=!selected||!growthFor(selected);
-  $('baseline-button').textContent=growthCalibration?'Actualitza l’inici amb l’instant seleccionat':'Marca l’instant seleccionat com a inici';
+  $('baseline-button').disabled=!selected;
+  $('baseline-button').textContent=growthCalibration?.captured_at?'Marca aquesta foto com a nou inici':'Marca aquesta foto com a inici';
   renderCalibrationGuides();
 }
 
@@ -184,8 +197,11 @@ function renderMonitoring(state) {
 
 let calibrationDrag=null;
 function renderCalibrationGuides(){const c=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72};const overlay=$('calibration-overlay');overlay.style.setProperty('--guide-left',`${c.left_x*100}%`);overlay.style.setProperty('--guide-right',`${c.right_x*100}%`);overlay.style.setProperty('--guide-top',`${c.initial_surface_y*100}%`);overlay.style.setProperty('--guide-bottom',`${c.bottom_y*100}%`);document.querySelectorAll('[data-guide]').forEach(line=>{const key=line.dataset.guide;line.style.left=key.endsWith('_x')?`${c[key]*100}%`:'';line.style.top=key.endsWith('_y')?`${c[key]*100}%`:'';});}
-function cameraPoint(event){const r=$('camera-reference-image').getBoundingClientRect();return{x:Math.max(0,Math.min(1,(event.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(event.clientY-r.top)/r.height))};}
-document.querySelectorAll('[data-guide]').forEach(line=>{line.addEventListener('pointerdown',event=>{event.preventDefault();line.setPointerCapture(event.pointerId);calibrationDrag=line.dataset.guide;});line.addEventListener('pointermove',event=>{if(!calibrationDrag)return;const p=cameraPoint(event);growthCalibration=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72};growthCalibration[calibrationDrag]=calibrationDrag.endsWith('_x')?p.x:p.y;renderCalibrationGuides();renderGrowth({calibration:growthCalibration});});line.addEventListener('pointerup',()=>calibrationDrag=null);line.addEventListener('pointercancel',()=>calibrationDrag=null);});
+function syncCameraFrame(image){if(!image.naturalWidth||!image.naturalHeight)return;image.closest('.camera-frame').style.aspectRatio=`${image.naturalWidth}/${image.naturalHeight}`;}
+['camera-reference-image','camera-current-image'].forEach(id=>$(id).addEventListener('load',event=>{syncCameraFrame(event.currentTarget);if(id==='camera-reference-image')renderCalibrationGuides();}));
+function cameraPoint(event){const frame=$('camera-reference-image').closest('.camera-frame'),r=frame.getBoundingClientRect(),image=$('camera-reference-image');let left=r.left,top=r.top,width=r.width,height=r.height;if(image.naturalWidth&&image.naturalHeight){const scale=Math.min(r.width/image.naturalWidth,r.height/image.naturalHeight);width=image.naturalWidth*scale;height=image.naturalHeight*scale;left+=(r.width-width)/2;top+=(r.height-height)/2;}return{x:Math.max(0,Math.min(1,(event.clientX-left)/width)),y:Math.max(0,Math.min(1,(event.clientY-top)/height))};}
+function moveGuide(key,event){const point=cameraPoint(event),c=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72},horizontal=key.endsWith('_y');let value=horizontal?point.y:point.x;const bounds={left_x:[0,c.right_x-.04],right_x:[c.left_x+.04,1],initial_surface_y:[0,c.bottom_y-.12],bottom_y:[c.initial_surface_y+.12,1]}[key];value=Math.max(bounds[0],Math.min(bounds[1],value));growthCalibration={...c,[key]:value};renderCalibrationGuides();renderGrowth({calibration:growthCalibration});}
+document.querySelectorAll('[data-guide]').forEach(line=>{line.addEventListener('pointerdown',event=>{event.preventDefault();line.setPointerCapture(event.pointerId);calibrationDrag={key:line.dataset.guide,pointerId:event.pointerId,line};moveGuide(calibrationDrag.key,event);});line.addEventListener('pointermove',event=>{if(!calibrationDrag||calibrationDrag.pointerId!==event.pointerId)return;moveGuide(calibrationDrag.key,event);});const finish=event=>{if(calibrationDrag?.pointerId===event.pointerId)calibrationDrag=null;};line.addEventListener('pointerup',finish);line.addEventListener('pointercancel',finish);});
 function adjustCalibrationGuide(direction){
   growthCalibration=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72};
   const key=$('calibration-guide').value,step=.002;
@@ -275,13 +291,14 @@ function selectPhoto(id){
   $('photo-timeline').value=String(index);
   renderGrowth({calibration:growthCalibration});drawGrowthChart(growthHistoryCache);
 }
-function selectReference(id){
+function selectReference(id,rebuild=true){
   const photo=allPhotos.find(item=>String(item.id)===String(id));if(!photo)return;
   selectedReferenceId=photo.id;$('photo-reference-select').value=String(photo.id);
   $('camera-reference-image').src=`/photos/${encodeURIComponent(photo.filename)}`;
   $('camera-reference-time').textContent=new Date(photo.captured_at).toLocaleString('ca-ES');
-  if(growthCalibration?.photo_id!==photo.id){let a={};try{a=JSON.parse(photo.analysis_json||'{}')}catch{};growthCalibration={left_x:growthCalibration?.left_x??.32,right_x:growthCalibration?.right_x??.68,bottom_y:.94,initial_surface_y:Number.isFinite(a.surface_y_ratio)?a.surface_y_ratio:.72,photo_id:photo.id,captured_at:photo.captured_at};}
-  renderCalibrationGuides();
+  if(String(growthCalibration?.photo_id)!==String(photo.id)){let a={};try{a=JSON.parse(photo.analysis_json||'{}')}catch{};growthCalibration={left_x:growthCalibration?.left_x??.32,right_x:growthCalibration?.right_x??.68,bottom_y:growthCalibration?.bottom_y??.94,initial_surface_y:Number.isFinite(a.surface_y_ratio)?a.surface_y_ratio:(growthCalibration?.initial_surface_y??.72),photo_id:photo.id,captured_at:photo.captured_at};}
+  renderCalibrationGuides();renderGrowth({calibration:growthCalibration});
+  if(rebuild&&allPhotos.length)renderPhotoLibrary(allPhotos);
 }
 function renderPhotoLibrary(rows){
   const selected=$('photo-select').value,refSelected=selectedReferenceId;
@@ -299,10 +316,10 @@ function renderPhotoLibrary(rows){
   });
   allPhotos.forEach(photo=>{const option=document.createElement('option');option.value=String(photo.id);option.textContent=new Date(photo.captured_at).toLocaleString('ca-ES');referenceSelect.append(option);});
   const slider=$('photo-timeline');slider.max=String(Math.max(0,photoLibrary.length-1));slider.disabled=photoLibrary.length<2;
-  if(!photoLibrary.length){currentSelect.innerHTML='<option value="">No hi ha captures en aquest període</option>';referenceSelect.replaceChildren();$('camera-current-image').removeAttribute('src');$('camera-reference-image').removeAttribute('src');$('camera-current-time').textContent='No hi ha captures disponibles en aquest període.';$('camera-reference-time').textContent='—';$('comparison-growth').textContent='Sense dades dins del període';$('photo-count').textContent='0 imatges';$('photo-grid').replaceChildren();return;}
+  if(!photoLibrary.length){currentSelect.innerHTML='<option value="">No hi ha captures posteriors a la referència dins d’aquest període</option>';slider.value='0';$('camera-current-image').removeAttribute('src');$('camera-current-time').textContent='No hi ha captures posteriors a la referència dins d’aquest període.';$('comparison-growth').textContent='Sense dades dins del període';$('photo-count').textContent='0 imatges';$('photo-grid').replaceChildren();const ref=allPhotos.find(photo=>String(photo.id)===String(refSelected))||referencePhoto;if(ref){referenceSelect.value=String(ref.id);$('camera-reference-image').src=`/photos/${encodeURIComponent(ref.filename)}`;$('camera-reference-time').textContent=new Date(ref.captured_at).toLocaleString('ca-ES');}return;}
   currentSelect.value=photoLibrary.some(photo=>String(photo.id)===selected)?selected:String(photoLibrary.at(-1).id);
   const ref=allPhotos.find(photo=>String(photo.id)===String(refSelected))||referencePhoto||photoLibrary[0];
-  selectReference(ref.id);selectPhoto(currentSelect.value);
+  selectReference(ref.id,false);selectPhoto(currentSelect.value);
   const grid=$('photo-grid');grid.replaceChildren();
   const recent=samplePhotos(photoLibrary).slice().reverse();
   $('photo-count').textContent=`${recent.length} mostrades · ${photoLibrary.length} originals`;
@@ -347,9 +364,11 @@ $('timelapse-toggle').addEventListener('click',event=>{
   timelapseTimer=setInterval(()=>{if(index>=photoLibrary.length-1){clearInterval(timelapseTimer);timelapseTimer=null;event.currentTarget.textContent='Reprodueix timelapse';return;}index++;selectPhoto(photoLibrary[index].id);},Math.max(75,1500/Number($('timelapse-speed').value)));
 });
 
-$('baseline-button').addEventListener('click',()=>{
+$('baseline-button').addEventListener('click',async()=>{
   const photo=photoLibrary.find(p=>String(p.id)===$('photo-select').value);if(!photo)return;
-  selectReference(photo.id);$('growth-detail').textContent='La captura seleccionada és ara l’inici. Ajusta les quatre línies i desa el calibratge.';
+  selectReference(photo.id,false);$('growth-detail').textContent='Desant la fotografia i les quatre línies com a referència inicial…';
+  try{const result=await json('/api/growth/calibration',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...growthCalibration,photo_id:photo.id})});growthCalibration=result.calibration;$('growth-detail').textContent='Referència inicial desada. Ajusta les quatre línies si cal.';renderPhotoLibrary(allPhotos);await refresh();}
+  catch(error){$('growth-detail').textContent=`No s’ha pogut desar la referència: ${error.message}`;}
 });
 $('calibration-save').addEventListener('click',async()=>{
   const photo=allPhotos.find(p=>String(p.id)===String(growthCalibration?.photo_id));if(!photo){$('growth-detail').textContent='Selecciona una fotografia de referència vàlida.';return;}
@@ -409,4 +428,4 @@ let timer;
 window.addEventListener('resize',()=>{clearTimeout(timer);timer=setTimeout(refresh,200)});
 showPage(location.hash.slice(1),false);refresh();setInterval(refresh,30000);
 setInterval(refreshFermenterOnly,5000);
-if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.8.0',{updateViaCache:'none'}).catch(()=>{});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.8.1',{updateViaCache:'none'}).catch(()=>{});

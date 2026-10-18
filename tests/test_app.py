@@ -50,7 +50,7 @@ class AppTests(unittest.TestCase):
             self.assertIn(section, dashboard.data)
         self.assertIn(b'Panettone Lab,', dashboard.data)
         self.assertIn(b'by gmuntal', dashboard.data)
-        self.assertIn(b'v0.8.0', dashboard.data)
+        self.assertIn(b'v0.8.1', dashboard.data)
         self.assertEqual(self.client.get("/api/state").json, {"photo": None, "reading": None})
 
     def test_fermenter_api_is_authenticated_and_explicitly_simulated(self):
@@ -75,7 +75,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.client.get("/healthz").json, {"status": "ok"})
 
     def test_brand_assets_are_public_versioned_and_match_manifest(self):
-        manifest_response = self.client.get("/manifest.webmanifest?v=0.8.0")
+        manifest_response = self.client.get("/manifest.webmanifest?v=0.8.1")
         self.assertEqual(manifest_response.status_code, 200)
         self.assertIn("no-store", manifest_response.headers["Cache-Control"])
         manifest = json.loads(manifest_response.data)
@@ -84,14 +84,14 @@ class AppTests(unittest.TestCase):
         self.assertEqual(manifest["scope"], "/")
         self.assertEqual({icon["sizes"] for icon in manifest["icons"]}, {"192x192", "512x512"})
         self.assertEqual(next(icon for icon in manifest["icons"] if icon["purpose"] == "maskable")["src"],
-                         "/static/icons/icon-maskable-512.png?v=0.8.0")
+                         "/static/icons/icon-maskable-512.png?v=0.8.1")
 
         expected = {
-            "/static/icons/apple-touch-icon.png?v=0.8.0": (180, 180),
-            "/static/icons/favicon-32.png?v=0.8.0": (32, 32),
-            "/static/icons/icon-192.png?v=0.8.0": (192, 192),
-            "/static/icons/icon-512.png?v=0.8.0": (512, 512),
-            "/static/icons/icon-maskable-512.png?v=0.8.0": (512, 512),
+            "/static/icons/apple-touch-icon.png?v=0.8.1": (180, 180),
+            "/static/icons/favicon-32.png?v=0.8.1": (32, 32),
+            "/static/icons/icon-192.png?v=0.8.1": (192, 192),
+            "/static/icons/icon-512.png?v=0.8.1": (512, 512),
+            "/static/icons/icon-maskable-512.png?v=0.8.1": (512, 512),
         }
         for url, dimensions in expected.items():
             with self.subTest(url=url):
@@ -99,7 +99,7 @@ class AppTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.mimetype, "image/png")
                 self.assertEqual(struct.unpack(">II", response.data[16:24]), dimensions)
-        ico = self.client.get("/static/icons/favicon.ico?v=0.8.0")
+        ico = self.client.get("/static/icons/favicon.ico?v=0.8.1")
         self.assertEqual(ico.status_code, 200)
         self.assertEqual(ico.data[:4], b"\x00\x00\x01\x00")
         self.assertEqual(struct.unpack("<H", ico.data[4:6])[0], 3)
@@ -107,13 +107,13 @@ class AppTests(unittest.TestCase):
 
         sw = self.client.get("/service-worker.js")
         self.assertIn("no-store", sw.headers["Cache-Control"])
-        self.assertIn(b"panettone-lab-v0.8.0", sw.data)
+        self.assertIn(b"panettone-lab-v0.8.1", sw.data)
         login = self.client.get("/login")
-        self.assertIn(b"v0.8.0", login.data)
+        self.assertIn(b"v0.8.1", login.data)
         self.client.post("/login", data={"username": "tester", "password": "correct-horse-battery-staple"})
         dashboard = self.client.get("/")
-        self.assertIn(b"/static/icons/icon-192.png?v=0.8.0", dashboard.data)
-        self.assertIn(b"apple-touch-icon.png?v=0.8.0", dashboard.data)
+        self.assertIn(b"/static/icons/icon-192.png?v=0.8.1", dashboard.data)
+        self.assertIn(b"apple-touch-icon.png?v=0.8.1", dashboard.data)
 
     def test_bad_login_is_rejected(self):
         response = self.client.post("/login", data={"username": "tester", "password": "wrong"})
@@ -174,8 +174,23 @@ class AppTests(unittest.TestCase):
         self.assertEqual(state.status_code, 200)
         self.assertEqual(state.json["growth_percent"], 0.0)
         self.assertEqual(state.json["growth_factor"], 1.0)
+        from app.database import growth_config
+        roi = growth_config()["roi"]
+        self.assertLess(roi["y0"], .75)
+        self.assertEqual(roi["y1"], .95)
         self.assertEqual(self.client.delete("/api/growth/calibration").status_code, 200)
         self.assertIsNone(self.client.get("/api/growth").json["calibration"])
+
+    def test_growth_history_keeps_invalid_camera_frames_for_chart_gaps(self):
+        from app.database import add_photo, growth_history
+        add_photo("valid.jpg", analysis={"growth_score": .2,
+                  "analysis_json": '{"valid":true,"surface_y_ratio":0.75}'})
+        add_photo("unclear.jpg", analysis={"growth_score": None,
+                  "analysis_json": '{"valid":false,"reason":"no_surface_transition"}'})
+        rows = growth_history()
+        self.assertEqual(len(rows), 2)
+        self.assertIsNone(rows[0]["growth_score"])
+        self.assertIn('"valid":false', rows[0]["analysis_json"])
 
     def test_photo_api_accepts_a_time_window_without_removing_other_photos(self):
         self.client.post("/login", data={"username": "tester", "password": "correct-horse-battery-staple"})

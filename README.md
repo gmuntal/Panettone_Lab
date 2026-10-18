@@ -1,6 +1,6 @@
-# Panettone Lab v0.8.0 (canvis locals, pendents de desplegar)
+# Panettone Lab v0.8.1 (canvis locals, pendents de desplegar)
 
-Els canvis locals de v0.8.0 encara no s’han desplegat a la Raspberry Pi; qualsevol deploy reiniciaria el contenidor i pot deixar un buit de dades durant la fermentació activa. L’auditoria i el pla de v0.7.0 són a [docs/redisseny-i-auditoria-2026-10-18.md](docs/redisseny-i-auditoria-2026-10-18.md).
+Els canvis locals de v0.8.1 encara no s’han desplegat a la Raspberry Pi; qualsevol deploy reiniciaria el contenidor i pot deixar un buit de dades durant la fermentació activa. L’auditoria i el pla de v0.7.0 són a [docs/redisseny-i-auditoria-2026-10-18.md](docs/redisseny-i-auditoria-2026-10-18.md).
 
 PWA local en català per observar la fermentació del lievito madre. El servei és autònom i no depèn de Cuinetes: parla directament amb la Tapo C210 i el Shelly Plus UNI a la xarxa local.
 
@@ -24,7 +24,7 @@ GitHub Actions --> GHCR (amd64 + arm64) --> Portainer Stack des d'aquest reposit
 - Pillow redimensiona les captures abans de l’anàlisi per mantenir baix el cost de CPU a la Raspberry Pi.
 - El service worker desa només l’esquelet estàtic. Dades, captures i sessió requereixen connexió i autenticació.
 - **Logotip i icones v0.6.0:** màster oficial a `app/static/icons/logo-original.png`; icones PWA, Apple, favicon i versió maskable a `app/static/icons/`. Els enllaços porten versió i el service worker substitueix la memòria cau antiga en activar-se.
-- **Control de fermentadora v0.8.0:** supervisió cada 5 s, modes Automàtic/Manual/Aturat, histèresi, horaris, alarmes i registre SQLite. La demanda continua en simulació per defecte.
+- **Control de fermentadora v0.8.1:** supervisió cada 5 s, modes Automàtic/Manual/Aturat, histèresi, horaris, alarmes i registre SQLite. La demanda continua en simulació per defecte.
 - **Sortida real preparada però desarmada.** La manta tèrmica és `switch:0` segons confirmació de l’usuari. El codi no envia ordres reals fins que quatre variables d’ambient s’habiliten; inclou renovació de `toggle_after` al Shelly per tornar a OFF si la Raspberry deixa de renovar la demanda. Cal validar físicament l’etapa de potència, el tall tèrmic independent i l’estat segur després de reiniciar el Shelly abans d’armar. Vegeu [l’auditoria de la fermentadora](docs/fermenter-audit.md).
 
 ## Execució local

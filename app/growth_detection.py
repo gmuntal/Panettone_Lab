@@ -29,6 +29,19 @@ def growth_from_surface(bottom_y, initial_surface_y, current_surface_y):
     return {"factor": round(factor, 3), "percent": round((factor - 1) * 100, 1)}
 
 
+def reproject_surface_ratio(surface_y, roi):
+    """Express a full-image surface coordinate as fill height in an ROI."""
+    try:
+        surface_y, top, bottom = map(float, (surface_y, roi["y0"], roi["y1"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    span = bottom - top
+    if not all(map(math.isfinite, (surface_y, top, bottom))) or span <= 0:
+        return None
+    ratio = (bottom - surface_y) / span
+    return ratio if 0 < ratio <= 1 else None
+
+
 def _otsu_threshold(histogram):
     total = sum(histogram)
     if not total:
