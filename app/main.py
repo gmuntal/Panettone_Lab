@@ -26,7 +26,7 @@ from .growth_detection import analyze_image
 from .scheduler import start_workers
 from .fermenter import get_state as get_fermenter_state, history as fermenter_history, update_settings as update_fermenter_settings
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.7.0"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -184,7 +184,9 @@ def create_app(start_background=False):
     @app.get("/")
     @login_required
     def dashboard():
-        return render_template("dashboard.html", app_version=APP_VERSION)
+        return render_template("dashboard.html", app_version=APP_VERSION,
+                               sensor_interval_seconds=settings.sensor_interval_seconds,
+                               photo_interval_seconds=settings.photo_interval_seconds)
 
     @app.get("/api/state")
     @login_required
@@ -327,7 +329,33 @@ def create_app(start_background=False):
     @login_required
     def web_fermentations():
         rows = read_rows("SELECT * FROM fermentations ORDER BY started_at DESC LIMIT 100", ())
+        for row in rows:
+            row["events"] = read_rows(
+                "SELECT * FROM events WHERE fermentation_id=? ORDER BY occurred_at,id", (row["id"],))
         return jsonify({"items": rows, "active": next((row for row in rows if row["ended_at"] is None), None)})
+
+    @app.get("/api/fermentations/<int:fermentation_id>/export")
+    @login_required
+    def web_fermentation_export(fermentation_id):
+        rows = read_rows("SELECT * FROM fermentations WHERE id=?", (fermentation_id,))
+        if not rows:
+            return jsonify({"error": "fermentació no trobada"}), 404
+        item = rows[0]
+        end = item["ended_at"] or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        started = datetime.fromisoformat(item["started_at"].replace("Z", "+00:00"))
+        finished = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        if finished <= started:
+            end = (started + timedelta(seconds=1)).isoformat(timespec="seconds")
+        archive, _ = build_session_zip(
+            settings.database_path, settings.photo_dir, item["started_at"], end,
+            app_version=APP_VERSION, timezone_name="Europe/Madrid",
+            sensor_interval_seconds=settings.sensor_interval_seconds,
+            photo_interval_seconds=settings.photo_interval_seconds,
+            supplied_session_id=f"fermentation-{fermentation_id}")
+        response = send_file(archive, mimetype="application/zip", as_attachment=True,
+                             download_name=f"panettone_lab_fermentacio_{fermentation_id}.zip", max_age=0)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.post("/api/fermentations")
     @login_required

@@ -1,4 +1,6 @@
-# Panettone Lab v0.6.0
+# Panettone Lab v0.7.0
+
+La revisió de l’auditoria, la còpia de seguretat i el pla de desplegament de v0.7.0 és a [docs/redisseny-i-auditoria-2026-10-18.md](docs/redisseny-i-auditoria-2026-10-18.md). La versió encara no s’ha desplegat a la Raspberry Pi perquè hi ha una fermentació activa.
 
 PWA local en català per observar la fermentació del lievito madre. El servei és autònom i no depèn de Cuinetes: parla directament amb la Tapo C210 i el Shelly Plus UNI a la xarxa local.
 
