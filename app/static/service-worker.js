@@ -1,15 +1,16 @@
-const CACHE='panettone-lab-v0.8.1';
+const CACHE='panettone-lab-v0.8.2';
 const SHELL=[
   '/login',
-  '/static/app.css?v=0.8.1',
-  '/static/app.js?v=0.8.1',
-  '/static/icons/apple-touch-icon.png?v=0.8.1',
-  '/static/icons/favicon-32.png?v=0.8.1',
-  '/static/icons/favicon.ico?v=0.8.1',
-  '/static/icons/icon-192.png?v=0.8.1',
-  '/static/icons/icon-512.png?v=0.8.1',
-  '/static/icons/icon-maskable-512.png?v=0.8.1',
-  '/manifest.webmanifest?v=0.8.1'
+  '/static/app.css?v=0.8.2',
+  '/static/camera-state.js?v=0.8.2',
+  '/static/app.js?v=0.8.2',
+  '/static/icons/apple-touch-icon.png?v=0.8.2',
+  '/static/icons/favicon-32.png?v=0.8.2',
+  '/static/icons/favicon.ico?v=0.8.2',
+  '/static/icons/icon-192.png?v=0.8.2',
+  '/static/icons/icon-512.png?v=0.8.2',
+  '/static/icons/icon-maskable-512.png?v=0.8.2',
+  '/manifest.webmanifest?v=0.8.2'
 ];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('panettone-lab-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));

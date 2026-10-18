@@ -31,6 +31,11 @@ class DatabaseMigrationTests(unittest.TestCase):
                                               photo_dir=photo_path)
             database.settings = config.settings
             database.init_db()
+            calibration = {"left_x": .21, "right_x": .79, "bottom_y": .94,
+                           "initial_surface_y": .71, "photo_id": 1,
+                           "captured_at": "2026-10-16T20:00:00+00:00"}
+            database.save_growth_calibration(calibration)
+            self.assertEqual(database.growth_config()["calibration"], calibration)
             with database.connect() as migrated:
                 self.assertEqual(migrated.execute("SELECT count(*) FROM readings").fetchone()[0], 1)
                 self.assertEqual(migrated.execute("SELECT count(*) FROM photos").fetchone()[0], 1)

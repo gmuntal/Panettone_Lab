@@ -27,7 +27,7 @@ from .growth_detection import analyze_image, growth_from_surface
 from .scheduler import start_workers
 from .fermenter import get_state as get_fermenter_state, history as fermenter_history, update_settings as update_fermenter_settings
 
-APP_VERSION = "0.8.1"
+APP_VERSION = "0.8.2"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -658,7 +658,9 @@ def create_app(start_background=False):
         roi = {"x0": guides["left_x"], "y0": detector_top,
                "x1": guides["right_x"], "y1": guides["bottom_y"]}
         save_growth_roi(roi)
-        save_growth_calibration({**guides, "photo_id": photo_id, "captured_at": photo["captured_at"]})
+        calibration = {**guides, "photo_id": photo_id, "captured_at": photo["captured_at"],
+                       "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        save_growth_calibration(calibration)
         # Re-seed the detector with a frame processed under the new ROI. This
         # avoids comparing coordinates produced with the previous crop.
         seed_photo = latest_analyzed_photo()

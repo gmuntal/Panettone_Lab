@@ -15,18 +15,26 @@ let readingsCache = [];
 let growthHistoryCache = [];
 let photoLibrary = [];
 let allPhotos = [];
-let growthCalibration = null;
+let savedGrowthCalibration = null;
+let growthCalibration = null; // local editing copy; never replace while dirty
+let calibrationDirty = false;
 let selectedReferenceId = null;
+let selectedFinalId = null;
+let explicitReferenceSelection = false;
+let ignoreBackendCalibration = false;
+let cameraInitialized = false;
 let cameraRangeStart = null;
 let cameraRangeEnd = null;
 let timelapseTimer = null;
+let refreshSequence = 0;
 
 function formPayload(form) {
   return Object.fromEntries([...new FormData(form)].filter(([,value])=>value!==''));
 }
 
-async function refreshFermentation() {
+async function refreshFermentation(sequence=null) {
   const data=await json('/api/fermentations');
+  if(sequence!==null&&sequence!==refreshSequence)return data;
   fermentationsCache=data.items||[];
   activeFermentation=data.active;
   $('session-status').textContent=activeFermentation
@@ -131,6 +139,8 @@ function drawGrowthChart(rows) {
   const canvas=$('growth-chart'),box=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
   canvas.width=box.width*dpr;canvas.height=box.height*dpr;
   const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
+  if(calibrationDirty){$('growth-empty').textContent='Desa el calibratge per mostrar una estimació fiable.';$('growth-empty').style.display='grid';return;}
+  $('growth-empty').textContent='No hi ha dades de creixement en aquest interval.';
   const w=box.width,h=box.height,p={l:38,r:10,t:14,b:25};
   const startAt=growthCalibration?.captured_at?new Date(growthCalibration.captured_at).getTime():null;
   const series=rows.filter(row=>inCameraRange(row.captured_at)&&(!startAt||new Date(row.captured_at).getTime()>=startAt)).slice().reverse().map(row=>{
@@ -171,13 +181,16 @@ function growthFor(photo){
   return {factor,percent:(factor-1)*100,confidence:analysis.confidence||0,surface:analysis.surface_y_ratio};
 }
 function renderGrowth(data){
-  growthCalibration=data.calibration||null;
+  if(data.calibration && PanettoneCameraState.shouldHydrateCalibration(calibrationDirty,ignoreBackendCalibration)){
+    savedGrowthCalibration=data.calibration;
+    growthCalibration={...data.calibration};
+  }
   const selected=photoLibrary.find(item=>String(item.id)===$('photo-select').value);
-  const result=growthFor(selected);
-  $('growth-level').textContent=result?`${result.percent>=0?'+':''}${result.percent.toFixed(0)}% · ×${result.factor.toFixed(2)}`:'No es pot estimar el creixement';
-  $('growth-detail').textContent=result?`${new Date(selected.captured_at).toLocaleString('ca-ES')} · confiança ${Math.round(result.confidence*100)}% · alçada estimada`:'Calibratge necessari o detecció no fiable en aquesta captura.';
+  const result=calibrationDirty?null:growthFor(selected);
+  $('growth-level').textContent=calibrationDirty?'Calibratge pendent de desar':result?`${result.percent>=0?'+':''}${result.percent.toFixed(0)}% · ×${result.factor.toFixed(2)}`:'Sense detecció fiable';
+  $('growth-detail').textContent=calibrationDirty?'Calibratge pendent de desar':result?`${new Date(selected.captured_at).toLocaleString('ca-ES')} · confiança ${Math.round(result.confidence*100)}% · alçada estimada`:'No es pot detectar la superfície actual';
   $('growth-change').textContent=growthCalibration?`Referència · ${fmtTime(growthCalibration.captured_at)}`:'Cal calibrar';
-  $('comparison-growth').textContent=result?`Creixement estimat ${result.percent>=0?'+':''}${result.percent.toFixed(0)}% · ×${result.factor.toFixed(2)} · confiança ${Math.round(result.confidence*100)}%`:'Calibratge necessari / no es pot estimar';
+  $('comparison-growth').textContent=calibrationDirty?'Calibratge pendent de desar':result?`Creixement estimat ${result.percent>=0?'+':''}${result.percent.toFixed(0)}% · ×${result.factor.toFixed(2)} · confiança ${Math.round(result.confidence*100)}%`:growthCalibration?'No es pot detectar la superfície actual':'Selecciona i desa un calibratge';
   $('current-surface-line').hidden=!result;
   if(result)$('current-surface-line').style.top=`${result.surface*100}%`;
   $('baseline-button').disabled=!selected;
@@ -200,13 +213,14 @@ function renderCalibrationGuides(){const c=growthCalibration||{left_x:.32,right_
 function syncCameraFrame(image){if(!image.naturalWidth||!image.naturalHeight)return;image.closest('.camera-frame').style.aspectRatio=`${image.naturalWidth}/${image.naturalHeight}`;}
 ['camera-reference-image','camera-current-image'].forEach(id=>$(id).addEventListener('load',event=>{syncCameraFrame(event.currentTarget);if(id==='camera-reference-image')renderCalibrationGuides();}));
 function cameraPoint(event){const frame=$('camera-reference-image').closest('.camera-frame'),r=frame.getBoundingClientRect(),image=$('camera-reference-image');let left=r.left,top=r.top,width=r.width,height=r.height;if(image.naturalWidth&&image.naturalHeight){const scale=Math.min(r.width/image.naturalWidth,r.height/image.naturalHeight);width=image.naturalWidth*scale;height=image.naturalHeight*scale;left+=(r.width-width)/2;top+=(r.height-height)/2;}return{x:Math.max(0,Math.min(1,(event.clientX-left)/width)),y:Math.max(0,Math.min(1,(event.clientY-top)/height))};}
-function moveGuide(key,event){const point=cameraPoint(event),c=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72},horizontal=key.endsWith('_y');let value=horizontal?point.y:point.x;const bounds={left_x:[0,c.right_x-.04],right_x:[c.left_x+.04,1],initial_surface_y:[0,c.bottom_y-.12],bottom_y:[c.initial_surface_y+.12,1]}[key];value=Math.max(bounds[0],Math.min(bounds[1],value));growthCalibration={...c,[key]:value};renderCalibrationGuides();renderGrowth({calibration:growthCalibration});}
+function moveGuide(key,event){const point=cameraPoint(event),c=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72},horizontal=key.endsWith('_y');let value=horizontal?point.y:point.x;const bounds={left_x:[0,c.right_x-.04],right_x:[c.left_x+.04,1],initial_surface_y:[0,c.bottom_y-.12],bottom_y:[c.initial_surface_y+.12,1]}[key];value=Math.max(bounds[0],Math.min(bounds[1],value));growthCalibration={...c,[key]:value};calibrationDirty=true;renderCalibrationGuides();renderGrowth({calibration:growthCalibration});}
 document.querySelectorAll('[data-guide]').forEach(line=>{line.addEventListener('pointerdown',event=>{event.preventDefault();line.setPointerCapture(event.pointerId);calibrationDrag={key:line.dataset.guide,pointerId:event.pointerId,line};moveGuide(calibrationDrag.key,event);});line.addEventListener('pointermove',event=>{if(!calibrationDrag||calibrationDrag.pointerId!==event.pointerId)return;moveGuide(calibrationDrag.key,event);});const finish=event=>{if(calibrationDrag?.pointerId===event.pointerId)calibrationDrag=null;};line.addEventListener('pointerup',finish);line.addEventListener('pointercancel',finish);});
 function adjustCalibrationGuide(direction){
   growthCalibration=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72};
   const key=$('calibration-guide').value,step=.002;
   const bounds={left_x:[0,growthCalibration.right_x-.04],right_x:[growthCalibration.left_x+.04,1],initial_surface_y:[0,growthCalibration.bottom_y-.12],bottom_y:[growthCalibration.initial_surface_y+.12,1]}[key];
   growthCalibration[key]=Math.max(bounds[0],Math.min(bounds[1],growthCalibration[key]+direction*step));
+  calibrationDirty=true;
   renderCalibrationGuides();renderGrowth({calibration:growthCalibration});
 }
 $('calibration-minus').addEventListener('click',()=>adjustCalibrationGuide(-1));
@@ -285,27 +299,50 @@ function selectPhoto(id){
   if(index<0)return;
   $('photo-select').value=String(photoLibrary[index].id);
   const photo=photoLibrary[index],image=$('camera-current-image');
+  selectedFinalId=photo.id;
   image.src=`/photos/${encodeURIComponent(photo.filename)}`;
   $('camera-current-time').textContent=`${new Date(photo.captured_at).toLocaleString('ca-ES')}${photo.fermentation_id?` · fermentació #${photo.fermentation_id}`:''}`;
   $('photo-previous').disabled=index===0;$('photo-next').disabled=index===photoLibrary.length-1;
   $('photo-timeline').value=String(index);
   renderGrowth({calibration:growthCalibration});drawGrowthChart(growthHistoryCache);
 }
-function selectReference(id,rebuild=true){
+function selectReference(id,{userInitiated=false,rebuild=true}={}){
   const photo=allPhotos.find(item=>String(item.id)===String(id));if(!photo)return;
   selectedReferenceId=photo.id;$('photo-reference-select').value=String(photo.id);
   $('camera-reference-image').src=`/photos/${encodeURIComponent(photo.filename)}`;
   $('camera-reference-time').textContent=new Date(photo.captured_at).toLocaleString('ca-ES');
-  if(String(growthCalibration?.photo_id)!==String(photo.id)){let a={};try{a=JSON.parse(photo.analysis_json||'{}')}catch{};growthCalibration={left_x:growthCalibration?.left_x??.32,right_x:growthCalibration?.right_x??.68,bottom_y:growthCalibration?.bottom_y??.94,initial_surface_y:Number.isFinite(a.surface_y_ratio)?a.surface_y_ratio:(growthCalibration?.initial_surface_y??.72),photo_id:photo.id,captured_at:photo.captured_at};}
+  if(String(growthCalibration?.photo_id)!==String(photo.id)){
+    let a={};try{a=JSON.parse(photo.analysis_json||'{}')}catch{}
+    const source=savedGrowthCalibration||growthCalibration||{};
+    growthCalibration={left_x:source.left_x??.32,right_x:source.right_x??.68,bottom_y:source.bottom_y??.94,
+      initial_surface_y:Number.isFinite(a.surface_y_ratio)?a.surface_y_ratio:(source.initial_surface_y??.72),
+      photo_id:photo.id,captured_at:photo.captured_at};
+    calibrationDirty=Boolean(userInitiated)||String(savedGrowthCalibration?.photo_id)!==String(photo.id);
+  }
+  if(userInitiated)explicitReferenceSelection=true;
   renderCalibrationGuides();renderGrowth({calibration:growthCalibration});
   if(rebuild&&allPhotos.length)renderPhotoLibrary(allPhotos);
 }
-function renderPhotoLibrary(rows){
-  const selected=$('photo-select').value,refSelected=selectedReferenceId;
+function autoReferenceForFermentation(fermentation){
+  if(!fermentation?.started_at)return null;
+  return PanettoneCameraState.firstPhotoAtOrAfter(allPhotos,fermentation.started_at);
+}
+function renderPhotoLibrary(rows,{fermentationChanged=false}={}){
+  const selected=selectedFinalId||$('photo-select').value;
   allPhotos=rows.filter(item=>item.camera_ok&&item.filename).slice().sort((a,b)=>new Date(a.captured_at)-new Date(b.captured_at));
-  const reference=growthCalibration?.photo_id||selectedReferenceId;
-  const referencePhoto=allPhotos.find(p=>String(p.id)===String(reference));
-  const refTime=referencePhoto?new Date(referencePhoto.captured_at).getTime():-Infinity;
+  const savedRef=allPhotos.find(p=>String(p.id)===String(savedGrowthCalibration?.photo_id));
+  const referenceFermentation=activeFermentation||fermentationsCache[0]||null;
+  if(!selectedReferenceId){
+    const savedMatchesFermentation=!referenceFermentation || (savedRef&&new Date(savedRef.captured_at)>=new Date(referenceFermentation.started_at));
+    const preferred=(savedMatchesFermentation&&savedRef) || autoReferenceForFermentation(referenceFermentation) || (!referenceFermentation?allPhotos[0]:null);
+    if(preferred){selectedReferenceId=preferred.id;if(!growthCalibration||String(growthCalibration.photo_id)!==String(preferred.id))selectReference(preferred.id,{rebuild:false});}
+  }else if(fermentationChanged&&!explicitReferenceSelection){
+    const preferred=autoReferenceForFermentation(activeFermentation);
+    selectedReferenceId=preferred?.id??null;growthCalibration=null;calibrationDirty=false;savedGrowthCalibration=null;ignoreBackendCalibration=true;
+    if(preferred)selectReference(preferred.id,{rebuild:false});
+  }
+  const referencePhoto=allPhotos.find(p=>String(p.id)===String(selectedReferenceId))||savedRef;
+  const refTime=referencePhoto?new Date(referencePhoto.captured_at).getTime():(referenceFermentation?Infinity:-Infinity);
   photoLibrary=allPhotos.filter(item=>new Date(item.captured_at).getTime()>=refTime&&inCameraRange(item.captured_at));
   $('camera-library-count').textContent=`${photoLibrary.length} ${photoLibrary.length===1?'imatge':'imatges'}`;
   const currentSelect=$('photo-select'),referenceSelect=$('photo-reference-select');
@@ -316,10 +353,15 @@ function renderPhotoLibrary(rows){
   });
   allPhotos.forEach(photo=>{const option=document.createElement('option');option.value=String(photo.id);option.textContent=new Date(photo.captured_at).toLocaleString('ca-ES');referenceSelect.append(option);});
   const slider=$('photo-timeline');slider.max=String(Math.max(0,photoLibrary.length-1));slider.disabled=photoLibrary.length<2;
-  if(!photoLibrary.length){currentSelect.innerHTML='<option value="">No hi ha captures posteriors a la referència dins d’aquest període</option>';slider.value='0';$('camera-current-image').removeAttribute('src');$('camera-current-time').textContent='No hi ha captures posteriors a la referència dins d’aquest període.';$('comparison-growth').textContent='Sense dades dins del període';$('photo-count').textContent='0 imatges';$('photo-grid').replaceChildren();const ref=allPhotos.find(photo=>String(photo.id)===String(refSelected))||referencePhoto;if(ref){referenceSelect.value=String(ref.id);$('camera-reference-image').src=`/photos/${encodeURIComponent(ref.filename)}`;$('camera-reference-time').textContent=new Date(ref.captured_at).toLocaleString('ca-ES');}return;}
-  currentSelect.value=photoLibrary.some(photo=>String(photo.id)===selected)?selected:String(photoLibrary.at(-1).id);
-  const ref=allPhotos.find(photo=>String(photo.id)===String(refSelected))||referencePhoto||photoLibrary[0];
-  selectReference(ref.id,false);selectPhoto(currentSelect.value);
+  if(!photoLibrary.length){currentSelect.innerHTML='<option value="">Cap fotografia disponible</option>';slider.value='0';$('camera-current-image').removeAttribute('src');$('camera-current-time').textContent=referencePhoto?'No hi ha captures posteriors a la referència dins d’aquest període.':referenceFermentation?'Encara no hi ha cap fotografia des de l’inici de la fermentació seleccionada.':'No hi ha fotografies disponibles en aquest període.';$('comparison-growth').textContent=referencePhoto?'No hi ha captures posteriors a la referència en aquest període.':'Espera una captura vàlida des de l’inici de la fermentació.';$('photo-count').textContent='0 imatges';$('photo-grid').replaceChildren();if(referencePhoto){referenceSelect.value=String(referencePhoto.id);$('camera-reference-image').src=`/photos/${encodeURIComponent(referencePhoto.filename)}`;$('camera-reference-time').textContent=new Date(referencePhoto.captured_at).toLocaleString('ca-ES');}else{$('camera-reference-image').removeAttribute('src');$('camera-reference-time').textContent='S’espera la primera fotografia posterior a l’inici.';}return;}
+  const finalId=PanettoneCameraState.preservePhotoId(selected,photoLibrary);
+  const final=photoLibrary.find(photo=>String(photo.id)===String(finalId));
+  selectedFinalId=final.id;currentSelect.value=String(final.id);
+  const ref=referencePhoto||photoLibrary[0];
+  if(selectedReferenceId===null){selectedReferenceId=ref.id;}
+  referenceSelect.value=String(ref.id);$('camera-reference-image').src=`/photos/${encodeURIComponent(ref.filename)}`;$('camera-reference-time').textContent=new Date(ref.captured_at).toLocaleString('ca-ES');
+  if(!growthCalibration){selectReference(ref.id,{rebuild:false});}else renderCalibrationGuides();
+  selectPhoto(final.id);
   const grid=$('photo-grid');grid.replaceChildren();
   const recent=samplePhotos(photoLibrary).slice().reverse();
   $('photo-count').textContent=`${recent.length} mostrades · ${photoLibrary.length} originals`;
@@ -328,13 +370,20 @@ function renderPhotoLibrary(rows){
 }
 
 async function refresh() {
+  const requestSequence=++refreshSequence;
+  const previousActiveId=activeFermentation?.id??null;
   try {
-    setCameraWindow();
+    if($('camera-range').value!=='custom')setCameraWindow();
     const [state,readings,photos,growth,growthHistory,monitoring,fermenter,fermenterHistoryData,fermentationData]=await Promise.all([
       json('/api/state'),json(`/api/readings?hours=${$('range').value}`),json('/api/photos?limit=10000'),
       json('/api/growth'),json('/api/growth/history?limit=20000'),json('/api/monitoring'),json('/api/fermenter'),
-      json(`/api/fermenter/history?hours=${$('range').value}`),refreshFermentation()
+      json(`/api/fermenter/history?hours=${$('range').value}`),refreshFermentation(requestSequence)
     ]);
+    if(!PanettoneCameraState.isLatestRequest(requestSequence,refreshSequence))return;
+    const currentActiveId=fermentationData.active?.id??null;
+    const fermentationChanged=cameraInitialized&&currentActiveId!==previousActiveId&&currentActiveId!==null;
+    if(fermentationChanged){selectedReferenceId=null;explicitReferenceSelection=false;selectedFinalId=null;growthCalibration=null;calibrationDirty=false;ignoreBackendCalibration=true;}
+    if(PanettoneCameraState.shouldHydrateCalibration(calibrationDirty,ignoreBackendCalibration)){savedGrowthCalibration=growth.calibration||null;growthCalibration=savedGrowthCalibration?{...savedGrowthCalibration}:null;}
     readingsCache=readings;growthHistoryCache=growthHistory;
     fermenterHistoryCache=fermenterHistoryData;
     renderMonitoring(monitoring);
@@ -347,35 +396,54 @@ async function refresh() {
     const latestImage=$('home-camera-image');
     if(photo?.camera_ok&&photo.filename){latestImage.src=`/photos/${encodeURIComponent(photo.filename)}`;latestImage.hidden=false;$('home-camera-time').textContent=`Captura ${new Date(photo.captured_at).toLocaleString('ca-ES')}`;}
     else{latestImage.removeAttribute('src');latestImage.hidden=true;$('home-camera-time').textContent=photo?`Darrera prova de càmera ${fmtTime(photo.captured_at)} · sense imatge vàlida`:'Encara no hi ha cap fotografia disponible.';}
-    drawChart(readings);growthCalibration=growth.calibration||growthCalibration;renderPhotoLibrary(photos);renderGrowth(growth);
+    drawChart(readings);renderPhotoLibrary(photos,{fermentationChanged});renderGrowth(growth);cameraInitialized=true;
     renderFermentations();
   }catch(error){if(error.message!=='Sessió caducada')console.warn('No s’ha pogut actualitzar el dashboard',error);}
 }
 
 $('photo-select').addEventListener('change',event=>selectPhoto(event.currentTarget.value));
-$('photo-reference-select').addEventListener('change',event=>selectReference(event.currentTarget.value));
+$('photo-reference-select').addEventListener('change',event=>selectReference(event.currentTarget.value,{userInitiated:true}));
+$('use-fermentation-start').addEventListener('click',()=>{
+  const photo=autoReferenceForFermentation(activeFermentation||fermentationsCache[0]);
+  if(!photo){$('calibration-feedback').textContent='Encara no hi ha cap captura a partir de l’inici d’aquesta fermentació.';return;}
+  explicitReferenceSelection=false;selectReference(photo.id,{userInitiated:false});
+  $('calibration-feedback').textContent='Referència de l’inici seleccionada. Desa el calibratge per conservar-la.';
+});
 $('photo-previous').addEventListener('click',()=>{const i=photoLibrary.findIndex(photo=>String(photo.id)===$('photo-select').value);if(i>0)selectPhoto(photoLibrary[i-1].id);});
 $('photo-next').addEventListener('click',()=>{const i=photoLibrary.findIndex(photo=>String(photo.id)===$('photo-select').value);if(i>=0&&i<photoLibrary.length-1)selectPhoto(photoLibrary[i+1].id);});
 $('photo-timeline').addEventListener('input',event=>{const photo=photoLibrary[Number(event.currentTarget.value)];if(photo)selectPhoto(photo.id);});
 $('timelapse-toggle').addEventListener('click',event=>{
-  if(timelapseTimer){clearInterval(timelapseTimer);timelapseTimer=null;event.currentTarget.textContent='Reprodueix timelapse';return;}
+  if(timelapseTimer){clearInterval(timelapseTimer);timelapseTimer=null;event.currentTarget.textContent='Reprodueix';return;}
   if(photoLibrary.length<2)return;
-  let index=photoLibrary.findIndex(photo=>String(photo.id)===$('photo-select').value);if(index<0)index=0;event.currentTarget.textContent='Atura el timelapse';
-  timelapseTimer=setInterval(()=>{if(index>=photoLibrary.length-1){clearInterval(timelapseTimer);timelapseTimer=null;event.currentTarget.textContent='Reprodueix timelapse';return;}index++;selectPhoto(photoLibrary[index].id);},Math.max(75,1500/Number($('timelapse-speed').value)));
+  if(!photoLibrary.some(photo=>String(photo.id)===String(selectedFinalId)))selectPhoto(photoLibrary.at(-1).id);event.currentTarget.textContent='Pausa';
+  timelapseTimer=setInterval(()=>{const next=PanettoneCameraState.nextPhotoId(selectedFinalId,photoLibrary);if(String(next)===String(selectedFinalId)){clearInterval(timelapseTimer);timelapseTimer=null;event.currentTarget.textContent='Reprodueix';return;}selectPhoto(next);},Math.max(75,1500/Number($('timelapse-speed').value)));
 });
+$('timelapse-reset').addEventListener('click',()=>{if(timelapseTimer){clearInterval(timelapseTimer);timelapseTimer=null;}$('timelapse-toggle').textContent='Reprodueix';if(photoLibrary.length)selectPhoto(photoLibrary[0].id);});
 
 $('baseline-button').addEventListener('click',async()=>{
   const photo=photoLibrary.find(p=>String(p.id)===$('photo-select').value);if(!photo)return;
-  selectReference(photo.id,false);$('growth-detail').textContent='Desant la fotografia i les quatre línies com a referència inicial…';
-  try{const result=await json('/api/growth/calibration',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...growthCalibration,photo_id:photo.id})});growthCalibration=result.calibration;$('growth-detail').textContent='Referència inicial desada. Ajusta les quatre línies si cal.';renderPhotoLibrary(allPhotos);await refresh();}
-  catch(error){$('growth-detail').textContent=`No s’ha pogut desar la referència: ${error.message}`;}
+  selectReference(photo.id,{userInitiated:true,rebuild:false});$('calibration-feedback').textContent='Desant la fotografia inicial i el calibratge…';
+  await saveGrowthCalibration(photo);
 });
 $('calibration-save').addEventListener('click',async()=>{
-  const photo=allPhotos.find(p=>String(p.id)===String(growthCalibration?.photo_id));if(!photo){$('growth-detail').textContent='Selecciona una fotografia de referència vàlida.';return;}
-  try{const result=await json('/api/growth/calibration',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...growthCalibration,photo_id:photo.id})});growthCalibration=result.calibration;$('growth-detail').textContent='Calibratge desat. La referència queda guardada.';await refresh();}
-  catch(error){$('growth-detail').textContent=`No s’ha pogut desar el calibratge: ${error.message}`;}
+  const photo=allPhotos.find(p=>String(p.id)===String(growthCalibration?.photo_id));if(!photo){$('calibration-feedback').textContent='No s’ha pogut desar: la fotografia de referència no està disponible.';return;}
+  await saveGrowthCalibration(photo);
 });
-$('calibration-reset').addEventListener('click',async()=>{try{await json('/api/growth/calibration',{method:'DELETE'});growthCalibration=null;selectedReferenceId=null;renderCalibrationGuides();renderGrowth({calibration:null});$('growth-detail').textContent='Calibratge persistent esborrat. Les fotografies i lectures no s’han modificat.';}catch(error){$('growth-detail').textContent=`No s’ha pogut restablir: ${error.message}`;}});
+async function saveGrowthCalibration(photo){
+  const submitted={...growthCalibration,photo_id:photo.id};
+  try{
+    await json('/api/growth/calibration',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(submitted)});
+    const confirmed=await json(`/api/growth?photo_id=${encodeURIComponent(photo.id)}`);
+    const saved=confirmed.calibration;
+    if(!PanettoneCameraState.calibrationMatches(saved,submitted))throw new Error('El servidor no ha retornat el mateix calibratge que s’ha enviat.');
+    savedGrowthCalibration={...saved};growthCalibration={...saved};selectedReferenceId=photo.id;selectedFinalId=$('photo-select').value||photo.id;
+    calibrationDirty=false;ignoreBackendCalibration=false;
+    const savedAt=saved.saved_at||new Date().toISOString();
+    $('calibration-feedback').textContent=`Calibratge desat correctament · ${new Date(savedAt).toLocaleString('ca-ES')}`;
+    renderCalibrationGuides();renderGrowth(confirmed);renderPhotoLibrary(allPhotos);drawGrowthChart(growthHistoryCache);
+  }catch(error){$('calibration-feedback').textContent=`No s’ha pogut desar el calibratge: ${error.message}`;}
+}
+$('calibration-reset').addEventListener('click',async()=>{try{await json('/api/growth/calibration',{method:'DELETE'});growthCalibration=null;savedGrowthCalibration=null;selectedReferenceId=null;calibrationDirty=false;ignoreBackendCalibration=false;explicitReferenceSelection=false;renderCalibrationGuides();renderGrowth({calibration:null});$('calibration-feedback').textContent='Calibratge restablert. Les fotografies i lectures no s’han modificat.';}catch(error){$('calibration-feedback').textContent=`No s’ha pogut restablir el calibratge: ${error.message}`;}});
 
 $('monitoring-button').addEventListener('click',async()=>{
   const button=$('monitoring-button');button.disabled=true;
@@ -420,12 +488,17 @@ $('event-form').addEventListener('submit',async event=>{
 });
 
 $('range').addEventListener('change',refresh);
-function setCameraWindow(){const value=$('camera-range').value;const now=Date.now();if(value==='all'){cameraRangeStart=cameraRangeEnd=null;}else if(value==='custom'){cameraRangeStart=$('camera-start').value?new Date($('camera-start').value).getTime():null;cameraRangeEnd=$('camera-end').value?new Date($('camera-end').value).getTime():null;}else{cameraRangeStart=now-Number(value)*3600000;cameraRangeEnd=now;}}
-$('camera-range').addEventListener('change',()=>{$('camera-custom-range').hidden=$('camera-range').value!=='custom';refresh();});
-$('camera-apply-range').addEventListener('click',refresh);$('photo-sampling').addEventListener('change',()=>refresh());
+function setCameraWindow(){const value=$('camera-range').value;if(value==='custom')return;const now=Date.now();cameraRangeStart=now-Number(value)*3600000;cameraRangeEnd=now;}
+$('camera-range').addEventListener('change',()=>{$('camera-custom-range').hidden=$('camera-range').value!=='custom';if($('camera-range').value!=='custom'){setCameraWindow();refresh();}});
+$('camera-apply-range').addEventListener('click',()=>{
+  const start=$('camera-start').value?new Date($('camera-start').value).getTime():NaN,end=$('camera-end').value?new Date($('camera-end').value).getTime():NaN;
+  if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end){$('calibration-feedback').textContent='Indica un inici i un final vàlids per al període personalitzat.';return;}
+  cameraRangeStart=start;cameraRangeEnd=end;$('calibration-feedback').textContent='';refresh();
+});
+$('photo-sampling').addEventListener('change',()=>refresh());
 $('timelapse-speed').addEventListener('change',()=>{if(timelapseTimer){clearInterval(timelapseTimer);timelapseTimer=null;$('timelapse-toggle').click();}});
 let timer;
 window.addEventListener('resize',()=>{clearTimeout(timer);timer=setTimeout(refresh,200)});
-showPage(location.hash.slice(1),false);refresh();setInterval(refresh,30000);
+setCameraWindow();showPage(location.hash.slice(1),false);refresh();setInterval(refresh,30000);
 setInterval(refreshFermenterOnly,5000);
-if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.8.1',{updateViaCache:'none'}).catch(()=>{});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.8.2',{updateViaCache:'none'}).catch(()=>{});
