@@ -29,11 +29,13 @@ Data de consulta: 17 d’octubre de 2026. Totes les consultes al Shelly s’han 
 
 ## Arquitectura proposada per al desenvolupament segur
 
-- Afegir una pantalla **Fermentadora** i una capa de controlador explícitament en **simulació**. El procés pot llegir telemetria del DHT22 i l’estat real de les dues sortides, però el codi no tindrà una crida `Switch.Set` mentre la instal·lació no estigui auditada i l’activació física no s’autoritzi.
+- Afegir una pantalla **Fermentadora** i una capa de controlador en simulació per defecte. S’ha afegit una ruta opcional i tancada per defecte a `Switch.Set` per la sortida 0, després que l’usuari confirmés que governa la manta; cal validar independentment les proteccions físiques abans d’armar-la.
 - Modes de simulació: automàtic (histèresi), manual (demanda virtual) i aturat. Qualsevol fallada de sensor, dada caducada, sobretemperatura, temps màxim o finestra horària tanca la sortida **simulada** immediatament.
 - Després d’un reinici de l’aplicació, tornar a aturat i demanda virtual OFF; conservar consigna/configuració i historial.
 - Desar canvis, transicions i alarmes a SQLite vinculats a la fermentació activa. Reutilitzar lectures existents de 30 s per a la gràfica i consultar l’estat Shelly a l’interval curt del simulador.
 - Per al control real futur caldrà primer identificar i validar el camí elèctric, configurar al Shelly un estat segur i un watchdog autònom, i provar el sistema sense càrrega abans d’una activació supervisada. El watchdog ha de continuar apagant la calefacció encara que la Raspberry o la xarxa caiguin.
+- El codi només arma l’accionament quan `SHELLY_REAL_CONTROL_ENABLED`, `SHELLY_HEATER_WIRING_VERIFIED`, `SHELLY_THERMAL_CUTOFF_VERIFIED` i `SHELLY_RESTART_OFF_VERIFIED` són `true`. Totes són `false` per defecte. Amb demanda ON, cada refresc RPC inclou `toggle_after` perquè el Shelly retorni a OFF si la Raspberry deixa de renovar l’ordre. Aquest lloguer de sortida no protegeix contra reinicis del mateix Shelly i no substitueix un tall tèrmic físic.
+- La confirmació de `switch:0` identifica el canal de control, però no demostra que el circuit real tingui un relé/contactor adequat, ni que el tall físic sigui funcional. L’auditoria remota anterior va trobar `initial_state=restore_last`; no s’ha modificat el Shelly ni s’ha enviat cap ordre de sortida durant aquest canvi.
 
 ## Fonts del fabricant
 

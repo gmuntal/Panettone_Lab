@@ -1,9 +1,10 @@
-"""Fermenter controller simulation. This module intentionally has no RPC write path."""
+"""Fail-closed fermenter controller with an optionally armed Shelly output."""
 import math
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from .database import active_fermentation_id, connect, utc_now
+from .config import settings, shelly_real_control_ready
 
 LOCAL_TZ = ZoneInfo("Europe/Madrid")
 MAX_SENSOR_AGE_SECONDS = 75
@@ -115,7 +116,10 @@ def get_state(history_limit=120):
     runtime["sensor_age_seconds"] = age
     runtime["sensor_fresh"] = bool(runtime.get("sensor_ok") and age is not None and age <= MAX_SENSOR_AGE_SECONDS)
     return {"config": config, "runtime": runtime, "schedule": scheduled,
-            "simulation_only": True, "real_output_control_enabled": False,
+            "simulation_only": not shelly_real_control_ready(),
+            "real_output_control_enabled": shelly_real_control_ready(),
+            "physical_control_block_reason": None if shelly_real_control_ready() else
+              "Control real desarmat: cal habilitar-lo i verificar cablejat, tall tèrmic i estat segur al reinici",
             "actions": actions}
 
 
@@ -128,18 +132,25 @@ def _write_action(db, event_type, config, runtime, details):
 
 
 def safe_start():
-    """Persistently put the simulator in STOPPED after every application restart."""
+    """Persistently stop the controller on restart; request physical OFF if armed."""
     with connect() as db:
         config = dict(db.execute("SELECT * FROM fermenter_settings WHERE id=1").fetchone())
         runtime = dict(db.execute("SELECT * FROM fermenter_runtime WHERE id=1").fetchone())
         changed = config["mode"] != "stopped" or bool(runtime["simulated_heater_on"])
         db.execute("UPDATE fermenter_settings SET mode='stopped',manual_on=0,updated_at=? WHERE id=1", (utc_now(),))
-        db.execute("UPDATE fermenter_runtime SET simulated_heater_on=0,heater_on_since=NULL,reason='Restart segur: simulació aturada' WHERE id=1")
+        db.execute("UPDATE fermenter_runtime SET simulated_heater_on=0,heater_on_since=NULL,reason='Reinici segur: controlador aturat' WHERE id=1")
         config["mode"] = "stopped"
         runtime["simulated_heater_on"] = 0
         if changed:
             _write_action(db, "safe_restart", config, runtime,
-                          "Reinici de l’aplicació: només simulació; cap ordre al Shelly")
+                          "Reinici: demanda local aturada")
+    if shelly_real_control_ready():
+        try:
+            from .devices import set_shelly_heater_output
+            set_shelly_heater_output(False, settings.shelly_watchdog_seconds)
+        except Exception:
+            # Startup remains stopped; the next worker cycle retries OFF.
+            pass
 
 
 def update_settings(payload):
@@ -202,7 +213,7 @@ def update_settings(payload):
 
 
 def poll_once(now=None):
-    """Read live sensor/output status, then evaluate only the virtual actuator."""
+    """Read sensor/output status, calculate demand and optionally drive gated output."""
     from .devices import read_shelly_components
     now = now or datetime.now(timezone.utc)
     timestamp = now.isoformat(timespec="seconds")
@@ -222,6 +233,7 @@ def poll_once(now=None):
         config = dict(db.execute("SELECT * FROM fermenter_settings WHERE id=1").fetchone())
         runtime = dict(db.execute("SELECT * FROM fermenter_runtime WHERE id=1").fetchone())
         old_error = runtime.get("error")
+        previous_observed_switch = runtime.get("switch0_on")
         if sensor_valid:
             runtime.update(temperature_c=temperature, humidity_rh=humidity, sensor_ok=1,
                            error=None, observed_at=timestamp)
@@ -236,6 +248,28 @@ def poll_once(now=None):
                 pass
         output, reason, lockout = decide_simulated_output(
             config, runtime, runtime.get("temperature_c"), sensor_valid and age_ok, now)
+        real_control = shelly_real_control_ready()
+        if real_control:
+            try:
+                from .devices import set_shelly_heater_output
+                if output or switches[0] is not False:
+                    set_shelly_heater_output(output, settings.shelly_watchdog_seconds)
+                from .devices import read_shelly_heater_output
+                switches = (read_shelly_heater_output(), switches[1])
+                if switches[0] is not output:
+                    raise RuntimeError("L’estat llegit no coincideix amb l’ordre enviada")
+            except Exception as exc:
+                output = False
+                reason = f"Shelly no confirma l’ordre; sortida segura demanada: {type(exc).__name__}"
+                runtime["error"] = type(exc).__name__
+                # A write may have reached the Shelly even if read-back failed;
+                # always send OFF and report the physical state as unknown.
+                switches = (None, switches[1])
+                try:
+                    from .devices import set_shelly_heater_output
+                    set_shelly_heater_output(False, settings.shelly_watchdog_seconds)
+                except Exception:
+                    pass
         if lockout and runtime.get("lockout_reason") != lockout:
             runtime["lockout_reason"] = lockout
             _write_action(db, "alarm", config, runtime, reason)
@@ -247,7 +281,12 @@ def poll_once(now=None):
             runtime["last_switch_at"] = timestamp
             runtime["heater_on_since"] = timestamp if output else None
             runtime["simulated_heater_on"] = int(output)
-            _write_action(db, "simulated_output_on" if output else "simulated_output_off", config, runtime, reason)
+            if not real_control:
+                _write_action(db, f"simulated_output_{'on' if output else 'off'}", config, runtime, reason)
+        if (real_control and switches[0] is not None and
+                switches[0] != previous_observed_switch):
+            _write_action(db, f"physical_output_{'on' if switches[0] else 'off'}", config,
+                          runtime, "Canvi físic llegit de Shelly switch:0")
         runtime["reason"] = reason
         db.execute("""UPDATE fermenter_runtime SET observed_at=?,temperature_c=?,humidity_rh=?,sensor_ok=?,error=?,
                    switch0_on=?,switch1_on=?,simulated_heater_on=?,reason=?,heater_on_since=?,last_switch_at=?,

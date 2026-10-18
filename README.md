@@ -1,6 +1,6 @@
-# Panettone Lab v0.7.0
+# Panettone Lab v0.8.0 (canvis locals, pendents de desplegar)
 
-La revisió de l’auditoria, la còpia de seguretat i el pla de desplegament de v0.7.0 és a [docs/redisseny-i-auditoria-2026-10-18.md](docs/redisseny-i-auditoria-2026-10-18.md). La versió encara no s’ha desplegat a la Raspberry Pi perquè hi ha una fermentació activa.
+Els canvis locals de v0.8.0 encara no s’han desplegat a la Raspberry Pi; qualsevol deploy reiniciaria el contenidor i pot deixar un buit de dades durant la fermentació activa. L’auditoria i el pla de v0.7.0 són a [docs/redisseny-i-auditoria-2026-10-18.md](docs/redisseny-i-auditoria-2026-10-18.md).
 
 PWA local en català per observar la fermentació del lievito madre. El servei és autònom i no depèn de Cuinetes: parla directament amb la Tapo C210 i el Shelly Plus UNI a la xarxa local.
 
@@ -24,8 +24,8 @@ GitHub Actions --> GHCR (amd64 + arm64) --> Portainer Stack des d'aquest reposit
 - Pillow redimensiona les captures abans de l’anàlisi per mantenir baix el cost de CPU a la Raspberry Pi.
 - El service worker desa només l’esquelet estàtic. Dades, captures i sessió requereixen connexió i autenticació.
 - **Logotip i icones v0.6.0:** màster oficial a `app/static/icons/logo-original.png`; icones PWA, Apple, favicon i versió maskable a `app/static/icons/`. Els enllaços porten versió i el service worker substitueix la memòria cau antiga en activar-se.
-- **Control de fermentadora v0.5.0 en simulació:** llegeix el DHT22 i l’estat de les dues sortides del Shelly cada 5 s; mostra temperatura, consigna, mode, programa horari, demandes simulades, gràfica i alarmes. El control automàtic fa servir histèresi, límit de temps ON, temps mínim entre canvis, detecció de lectures invàlides i tall virtual per sobretemperatura. La configuració i el registre s’afegeixen a SQLite sense reescriure les dades antigues.
-- **No acciona la resistència.** Els modes Automàtic i Manual són simulacions; cap ruta d’API no envia una ordre de canvi d’estat al Shelly. Després de reiniciar, el simulador torna a Aturat. No activar control real fins a identificar el canal i validar cablejat, relé/contactor, tall tèrmic físic i un watchdog local independent. Vegeu [l’auditoria de la fermentadora](docs/fermenter-audit.md).
+- **Control de fermentadora v0.8.0:** supervisió cada 5 s, modes Automàtic/Manual/Aturat, histèresi, horaris, alarmes i registre SQLite. La demanda continua en simulació per defecte.
+- **Sortida real preparada però desarmada.** La manta tèrmica és `switch:0` segons confirmació de l’usuari. El codi no envia ordres reals fins que quatre variables d’ambient s’habiliten; inclou renovació de `toggle_after` al Shelly per tornar a OFF si la Raspberry deixa de renovar la demanda. Cal validar físicament l’etapa de potència, el tall tèrmic independent i l’estat segur després de reiniciar el Shelly abans d’armar. Vegeu [l’auditoria de la fermentadora](docs/fermenter-audit.md).
 
 ## Execució local
 
@@ -65,6 +65,12 @@ Amb `latest`, GitOps pot detectar un commit abans que GitHub Actions acabi de pu
 | `CAMERA_USERNAME`, `CAMERA_PASSWORD` | buit | Credencials RTSP opcionals |
 | `SHELLY_URL` | `http://10.85.3.202/rpc/Shelly.GetStatus` | RPC JSON |
 | `SHELLY_USERNAME`, `SHELLY_PASSWORD` | buit | HTTP Digest opcional |
+| `SHELLY_HEATER_OUTPUT_ID` | `0` | Sortida confirmada per la manta; altres valors rebutjats |
+| `SHELLY_REAL_CONTROL_ENABLED` | `false` | Habilitació explícita del codi d’accionament |
+| `SHELLY_HEATER_WIRING_VERIFIED` | `false` | Atesta que s’ha revisat relé/contactor i cablejat |
+| `SHELLY_THERMAL_CUTOFF_VERIFIED` | `false` | Atesta tall tèrmic físic independent |
+| `SHELLY_RESTART_OFF_VERIFIED` | `false` | Atesta estat OFF segur després d’un reinici del Shelly |
+| `SHELLY_OUTPUT_WATCHDOG_SECONDS` | `15` | Retorn local a OFF si no es renova (10–60 s) |
 | `TEMPERATURE_KEY`, `HUMIDITY_KEY` | `temperature:100.tC`, `humidity:100.rh` | Ruta als valors del JSON Shelly |
 | `SENSOR_INTERVAL_SECONDS` | `30` | Període de lectura |
 | `PHOTO_INTERVAL_SECONDS` | `120` | Període de captura |

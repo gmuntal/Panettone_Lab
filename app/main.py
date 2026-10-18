@@ -18,15 +18,16 @@ from .config import settings, validate_settings
 from .database import (growth_config, growth_history, init_db, latest_analyzed_photo,
                        monitoring_state, set_monitoring_active,
                        latest_state, recent_photos, recent_readings, save_growth_roi,
+                       photos_in_range, save_growth_calibration, clear_growth_calibration,
                        set_growth_baseline, update_photo_analysis, active_fermentation_id,
                        add_event, end_fermentation, start_fermentation)
 from .devices import capture_photo
 from .exporting import build_session_zip, get_observation_session, list_observation_sessions
-from .growth_detection import analyze_image
+from .growth_detection import analyze_image, growth_from_surface
 from .scheduler import start_workers
 from .fermenter import get_state as get_fermenter_state, history as fermenter_history, update_settings as update_fermenter_settings
 
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.8.0"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -241,10 +242,20 @@ def create_app(start_background=False):
     @app.get("/api/photos")
     @login_required
     def photos():
-        limit = request.args.get("limit", default=48, type=int)
+        limit = request.args.get("limit", default=3000, type=int)
         if limit is None:
             abort(400)
-        return jsonify(recent_photos(min(500, max(1, limit))))
+        start, end = request.args.get("start"), request.args.get("end")
+        if bool(start) != bool(end):
+            abort(400, description="start i end són obligatoris conjuntament")
+        if start and end:
+            try:
+                if datetime.fromisoformat(start.replace("Z", "+00:00")) > datetime.fromisoformat(end.replace("Z", "+00:00")):
+                    abort(400)
+            except ValueError:
+                abort(400)
+        rows = photos_in_range(start, end, min(10000, max(1, limit)))
+        return jsonify(rows)
 
     def observation_session_or_404(session_id):
         item = get_observation_session(settings.database_path, session_id)
@@ -579,7 +590,12 @@ def create_app(start_background=False):
     @login_required
     def growth():
         config = growth_config()
-        photo = latest_analyzed_photo()
+        photo_id = request.args.get("photo_id", type=int)
+        if photo_id:
+            matches = read_rows("SELECT * FROM photos WHERE id=? AND camera_ok=1", (photo_id,))
+            photo = matches[0] if matches else None
+        else:
+            photo = latest_analyzed_photo()
         measurement = None
         if photo:
             try:
@@ -587,11 +603,21 @@ def create_app(start_background=False):
             except (TypeError, ValueError):
                 measurement = None
         baseline = config["baseline"]
+        calibration = config.get("calibration")
         change_points = None
+        growth_percent = factor = None
         direction = "pendent"
         if measurement and measurement.get("valid") and photo:
             direction = "sense_referencia"
-            if baseline and isinstance(baseline.get("height_ratio"), (int, float)):
+            if calibration and isinstance(measurement.get("surface_y_ratio"), (int, float)):
+                result = growth_from_surface(calibration["bottom_y"],
+                                             calibration["initial_surface_y"],
+                                             measurement["surface_y_ratio"])
+                if result:
+                    factor = result["factor"]
+                    growth_percent = result["percent"]
+                    change_points = growth_percent
+            elif baseline and isinstance(baseline.get("height_ratio"), (int, float)):
                 change_points = round((photo["growth_score"] - baseline["height_ratio"]) * 100, 1)
                 if change_points > 1.5:
                     direction = "pujant"
@@ -599,9 +625,41 @@ def create_app(start_background=False):
                     direction = "baixant"
                 else:
                     direction = "estable"
-        return jsonify({"roi": config["roi"], "baseline": baseline, "photo": photo,
+        return jsonify({"roi": config["roi"], "baseline": baseline,
+                        "calibration": config.get("calibration"), "photo": photo,
                         "measurement": measurement, "change_points": change_points,
+                        "growth_percent": growth_percent, "growth_factor": factor,
                         "direction": direction})
+
+    @app.post("/api/growth/calibration")
+    @login_required
+    def growth_calibration():
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            abort(400)
+        try:
+            guides = {key: round(float(payload[key]), 5) for key in
+                      ("left_x", "right_x", "bottom_y", "initial_surface_y")}
+            photo_id = int(payload["photo_id"])
+        except (KeyError, TypeError, ValueError):
+            abort(400)
+        if (any(not 0 <= value <= 1 for value in guides.values()) or
+                guides["right_x"] - guides["left_x"] < 0.04 or
+                guides["bottom_y"] - guides["initial_surface_y"] < 0.12):
+            return jsonify({"error": "Les línies no delimiten una alçada inicial vàlida."}), 400
+        photo = next(iter(read_rows("SELECT id,captured_at,filename,camera_ok FROM photos WHERE id=?", (photo_id,))), None)
+        if not photo or not photo["camera_ok"] or not photo["filename"]:
+            return jsonify({"error": "La fotografia de referència ja no està disponible."}), 404
+        save_growth_roi({"x0": guides["left_x"], "y0": guides["initial_surface_y"],
+                         "x1": guides["right_x"], "y1": guides["bottom_y"]})
+        save_growth_calibration({**guides, "photo_id": photo_id, "captured_at": photo["captured_at"]})
+        return jsonify({"calibration": growth_config().get("calibration"), "photo": photo})
+
+    @app.delete("/api/growth/calibration")
+    @login_required
+    def growth_calibration_reset():
+        clear_growth_calibration()
+        return jsonify({"calibration": None})
 
     @app.post("/api/growth/preview")
     @login_required
@@ -655,7 +713,7 @@ def create_app(start_background=False):
         limit = request.args.get("limit", default=500, type=int)
         if limit is None:
             abort(400)
-        return jsonify(growth_history(min(2000, max(1, limit))))
+        return jsonify(growth_history(min(20000, max(1, limit))))
 
     @app.post("/api/growth/roi")
     @login_required

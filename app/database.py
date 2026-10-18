@@ -243,7 +243,25 @@ def growth_config():
         baseline = None
     if not isinstance(roi, dict) or set(("x0", "y0", "x1", "y1")) - roi.keys():
         roi = dict(DEFAULT_ROI)
-    return {"roi": roi, "baseline": baseline if isinstance(baseline, dict) else None}
+    try:
+        calibration = json.loads(rows.get("calibration", ""))
+    except (TypeError, ValueError):
+        calibration = None
+    return {"roi": roi, "baseline": baseline if isinstance(baseline, dict) else None,
+            "calibration": calibration if isinstance(calibration, dict) else None}
+
+
+def save_growth_calibration(calibration):
+    """Persist normalized vessel/reference guides without changing source photos."""
+    with connect() as db:
+        db.execute("INSERT INTO growth_settings(key,value) VALUES('calibration',?) "
+                   "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                   (json.dumps(calibration, separators=(",", ":")),))
+
+
+def clear_growth_calibration():
+    with connect() as db:
+        db.execute("DELETE FROM growth_settings WHERE key='calibration'")
 
 
 def save_growth_roi(roi):
@@ -287,6 +305,19 @@ def recent_photos(limit=48):
     with connect() as db:
         return [dict(row) for row in db.execute(
             "SELECT * FROM photos ORDER BY captured_at DESC LIMIT ?", (int(limit),))]
+
+
+def photos_in_range(start=None, end=None, limit=3000):
+    clauses, params = [], []
+    if start:
+        clauses.append("captured_at >= ?"); params.append(start)
+    if end:
+        clauses.append("captured_at <= ?"); params.append(end)
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    with connect() as db:
+        rows = db.execute(f"SELECT * FROM photos{where} ORDER BY captured_at DESC,id DESC LIMIT ?",
+                          (*params, int(limit))).fetchall()
+    return [dict(row) for row in reversed(rows)]
 
 
 def growth_history(limit=500):

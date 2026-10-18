@@ -14,6 +14,11 @@ let fermentationsCache = [];
 let readingsCache = [];
 let growthHistoryCache = [];
 let photoLibrary = [];
+let allPhotos = [];
+let growthCalibration = null;
+let selectedReferenceId = null;
+let cameraRangeStart = null;
+let cameraRangeEnd = null;
 let timelapseTimer = null;
 
 function formPayload(form) {
@@ -127,47 +132,44 @@ function drawGrowthChart(rows) {
   canvas.width=box.width*dpr;canvas.height=box.height*dpr;
   const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
   const w=box.width,h=box.height,p={l:38,r:10,t:14,b:25};
-  const valid=rows.filter(row=>Number.isFinite(row.growth_score)).reverse();
+  const valid=rows.filter(row=>inCameraRange(row.captured_at)).map(row=>{let a={};try{a=JSON.parse(row.analysis_json||'{}')}catch{};if(!a.valid||!growthCalibration)return null;const base=growthCalibration.bottom_y-growthCalibration.initial_surface_y,cur=growthCalibration.bottom_y-a.surface_y_ratio;return base>0&&cur>0?{...row,growth_score:(cur/base-1)*100}:null;}).filter(Boolean).reverse();
   $('growth-empty').style.display=valid.length?'none':'grid';if(!valid.length)return;
-  const vals=valid.map(row=>row.growth_score),min=Math.max(0,Math.floor((Math.min(...vals)-.08)*10)/10),max=Math.min(1,Math.ceil((Math.max(...vals)+.08)*10)/10);
-  const range=Math.max(.15,max-min),low=Math.max(0,min),high=Math.min(1,low+range);
+  const vals=valid.map(row=>row.growth_score),min=Math.floor(Math.min(...vals)-10),max=Math.ceil(Math.max(...vals)+10);
+  const range=Math.max(20,max-min),low=min,high=min+range;
   ctx.font='10px sans-serif';ctx.fillStyle='#9aa69f';ctx.strokeStyle='#edf0ed';ctx.lineWidth=1;
-  for(let i=0;i<4;i++){const ratio=i/3,y=p.t+(h-p.t-p.b)*ratio;ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();ctx.fillText(`${Math.round((high-(high-low)*ratio)*100)}%`,0,y+3)}
+  for(let i=0;i<4;i++){const ratio=i/3,y=p.t+(h-p.t-p.b)*ratio;ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();ctx.fillText(`${Math.round(high-(high-low)*ratio)}%`,0,y+3)}
   ctx.strokeStyle='#4a9878';ctx.lineWidth=2;ctx.lineJoin='round';ctx.beginPath();
-  valid.forEach((row,i)=>{const x=p.l+(w-p.l-p.r)*i/Math.max(1,valid.length-1),y=p.t+(h-p.t-p.b)*(1-(row.growth_score-low)/(high-low||1));if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});ctx.stroke();
+  const start=cameraRangeStart??new Date(valid[0].captured_at).getTime(),end=cameraRangeEnd??new Date(valid.at(-1).captured_at).getTime(),span=Math.max(1,end-start);
+  valid.forEach((row,i)=>{const x=p.l+(w-p.l-p.r)*(new Date(row.captured_at).getTime()-start)/span,y=p.t+(h-p.t-p.b)*(1-(row.growth_score-low)/(high-low||1));if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});ctx.stroke();
   const first=new Date(valid[0].captured_at),last=new Date(valid.at(-1).captured_at);ctx.fillStyle='#9aa69f';
-  ctx.fillText(new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(first),p.l,h-4);
-  ctx.fillText(new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(last),Math.max(p.l,w-p.r-35),h-4);
+  ctx.fillText(new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(start)),p.l,h-4);
+  ctx.fillText(new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(end)),Math.max(p.l,w-p.r-35),h-4);
 }
 
-function renderGrowth(data) {
-  const photo=data.photo,measurement=data.measurement;
-  if(!measurement?.valid||!photo){
-    $('growth-level').textContent='Sense detecció fiable';
-    $('growth-detail').textContent='Revisa la zona del pot i la il·luminació de la captura.';
-    $('growth-change').textContent=data.baseline?'Referència desada':'Cal una captura clara';
-    $('growth-change').className='growth-change muted-change';
-  }else{
-    $('growth-level').textContent=`Alçada estimada · ${Math.round(photo.growth_score*100)}% de la zona`;
-    $('growth-change').className=`growth-change ${data.direction}`;
-    if(data.change_points===null){
-      $('growth-change').textContent='Sense referència';
-      $('growth-detail').textContent='Transició visual detectada · Marca el nivell inicial quan el pot estigui a punt.';
-    }else{
-      const sign=data.change_points>0?'+':'';
-      const label={pujant:'Pujant',baixant:'Baixant',estable:'Estable'}[data.direction]||'Canvi visual';
-      $('growth-change').textContent=`${label} · ${sign}${data.change_points} punts`;
-      $('growth-detail').textContent=`Comparat amb ${fmtTime(data.baseline.captured_at)} · seguiment visual continu.`;
-    }
-  }
-  $('baseline-button').disabled=!measurement?.valid || (measurement.confidence||0)<.45;
-  $('baseline-button').textContent=data.baseline?'Reinicia el nivell inicial':'Marca el nivell inicial';
-  if(photo?.filename&&!freshPreviewUrl){
-    const image=$('growth-preview');
-    const url=`/photos/${encodeURIComponent(photo.filename)}`;
-    if(image.dataset.photo!==url){image.src=url;image.dataset.photo=url;}
-  }
-  renderRoi(data.roi);
+function inCameraRange(value){const time=new Date(value).getTime();return (!cameraRangeStart||time>=cameraRangeStart)&&(!cameraRangeEnd||time<=cameraRangeEnd);}
+function growthFor(photo){
+  if(!photo||!growthCalibration)return null;
+  let analysis={};try{analysis=JSON.parse(photo.analysis_json||'{}')}catch{}
+  if(!analysis.valid||!Number.isFinite(analysis.surface_y_ratio))return null;
+  const initial=growthCalibration.bottom_y-growthCalibration.initial_surface_y;
+  const current=growthCalibration.bottom_y-analysis.surface_y_ratio;
+  if(initial<=0||current<=0)return null;
+  const factor=current/initial;
+  return {factor,percent:(factor-1)*100,confidence:analysis.confidence||0,surface:analysis.surface_y_ratio};
+}
+function renderGrowth(data){
+  growthCalibration=data.calibration||null;
+  const selected=photoLibrary.find(item=>String(item.id)===$('photo-select').value);
+  const result=growthFor(selected);
+  $('growth-level').textContent=result?`${result.percent>=0?'+':''}${result.percent.toFixed(0)}% · ×${result.factor.toFixed(2)}`:'No es pot estimar el creixement';
+  $('growth-detail').textContent=result?`${new Date(selected.captured_at).toLocaleString('ca-ES')} · confiança ${Math.round(result.confidence*100)}% · alçada estimada`:'Calibratge necessari o detecció no fiable en aquesta captura.';
+  $('growth-change').textContent=growthCalibration?`Referència · ${fmtTime(growthCalibration.captured_at)}`:'Cal calibrar';
+  $('comparison-growth').textContent=result?`Creixement estimat ${result.percent>=0?'+':''}${result.percent.toFixed(0)}% · ×${result.factor.toFixed(2)} · confiança ${Math.round(result.confidence*100)}%`:'Calibratge necessari / no es pot estimar';
+  $('current-surface-line').hidden=!result;
+  if(result)$('current-surface-line').style.top=`${result.surface*100}%`;
+  $('baseline-button').disabled=!selected||!growthFor(selected);
+  $('baseline-button').textContent=growthCalibration?'Actualitza l’inici amb l’instant seleccionat':'Marca l’instant seleccionat com a inici';
+  renderCalibrationGuides();
 }
 
 function renderMonitoring(state) {
@@ -180,92 +182,50 @@ function renderMonitoring(state) {
   if(!state.active){camera.className='camera-status paused';camera.querySelector('span').textContent='Seguiment aturat';}
 }
 
-let roi = {x0:.36,y0:.32,x1:.58,y1:.95};
-let roiDrag = null;
-function renderRoi(value) {
-  if(value)roi={...value};
-  const box=$('roi-box');
-  box.style.left=`${roi.x0*100}%`;box.style.top=`${roi.y0*100}%`;
-  box.style.width=`${(roi.x1-roi.x0)*100}%`;box.style.height=`${(roi.y1-roi.y0)*100}%`;
+let calibrationDrag=null;
+function renderCalibrationGuides(){const c=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72};const overlay=$('calibration-overlay');overlay.style.setProperty('--guide-left',`${c.left_x*100}%`);overlay.style.setProperty('--guide-right',`${c.right_x*100}%`);overlay.style.setProperty('--guide-top',`${c.initial_surface_y*100}%`);overlay.style.setProperty('--guide-bottom',`${c.bottom_y*100}%`);document.querySelectorAll('[data-guide]').forEach(line=>{const key=line.dataset.guide;line.style.left=key.endsWith('_x')?`${c[key]*100}%`:'';line.style.top=key.endsWith('_y')?`${c[key]*100}%`:'';});}
+function cameraPoint(event){const r=$('camera-reference-image').getBoundingClientRect();return{x:Math.max(0,Math.min(1,(event.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(event.clientY-r.top)/r.height))};}
+document.querySelectorAll('[data-guide]').forEach(line=>{line.addEventListener('pointerdown',event=>{event.preventDefault();line.setPointerCapture(event.pointerId);calibrationDrag=line.dataset.guide;});line.addEventListener('pointermove',event=>{if(!calibrationDrag)return;const p=cameraPoint(event);growthCalibration=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72};growthCalibration[calibrationDrag]=calibrationDrag.endsWith('_x')?p.x:p.y;renderCalibrationGuides();renderGrowth({calibration:growthCalibration});});line.addEventListener('pointerup',()=>calibrationDrag=null);line.addEventListener('pointercancel',()=>calibrationDrag=null);});
+function adjustCalibrationGuide(direction){
+  growthCalibration=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72};
+  const key=$('calibration-guide').value,step=.002;
+  const bounds={left_x:[0,growthCalibration.right_x-.04],right_x:[growthCalibration.left_x+.04,1],initial_surface_y:[0,growthCalibration.bottom_y-.12],bottom_y:[growthCalibration.initial_surface_y+.12,1]}[key];
+  growthCalibration[key]=Math.max(bounds[0],Math.min(bounds[1],growthCalibration[key]+direction*step));
+  renderCalibrationGuides();renderGrowth({calibration:growthCalibration});
 }
-function pointerPosition(event) {
-  const rect=$('growth-preview').getBoundingClientRect();
-  return {x:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),y:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))};
-}
-$('growth-preview').addEventListener('pointerdown',event=>{
-  if(!event.isPrimary)return;event.preventDefault();$('growth-preview').setPointerCapture(event.pointerId);
-  roiDrag=pointerPosition(event);roi={x0:roiDrag.x,y0:roiDrag.y,x1:roiDrag.x,y1:roiDrag.y};renderRoi();
-});
-$('growth-preview').addEventListener('pointermove',event=>{
-  if(!roiDrag)return;const point=pointerPosition(event);
-  roi={x0:Math.min(roiDrag.x,point.x),y0:Math.min(roiDrag.y,point.y),x1:Math.max(roiDrag.x,point.x),y1:Math.max(roiDrag.y,point.y)};renderRoi();
-});
-const finishRoi=()=>{roiDrag=null;};
-$('growth-preview').addEventListener('pointerup',finishRoi);$('growth-preview').addEventListener('pointercancel',finishRoi);
-
-const calibration=$('growth-calibration'),roiMessage=$('roi-message'),saveRoiButton=$('save-roi'),testRoiButton=$('test-roi');
-let previewRequest=null;
-async function captureRoiPreview(){
-  const image=$('growth-preview');
-  previewRequest?.abort();const controller=new AbortController();previewRequest=controller;
-  testRoiButton.disabled=true;saveRoiButton.disabled=true;
-  roiMessage.textContent='Capturant i comprovant aquesta zona…';
-  try{
-    const response=await fetch('/api/growth/preview',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify({roi}),signal:controller.signal});
-    if(response.status===401){location.href='/login';throw new Error('Sessió caducada');}
-    if(!response.ok){const payload=await response.json();throw new Error(payload.error||'No s’ha pogut capturar la imatge.');}
-    const valid=response.headers.get('X-Growth-Valid')==='true';
-    const score=Number(response.headers.get('X-Growth-Score'));
-    const confidence=Number(response.headers.get('X-Growth-Confidence'));
-    const blob=await response.blob();
-    if(!calibration.open)return;
-    if(freshPreviewUrl)URL.revokeObjectURL(freshPreviewUrl);
-    freshPreviewUrl=URL.createObjectURL(blob);image.dataset.photo='fresh-preview';
-    const loaded=new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('No s’ha pogut mostrar la captura actual.'));});
-    image.src=freshPreviewUrl;await loaded;
-    saveRoiButton.disabled=false;testRoiButton.disabled=false;
-    roiMessage.textContent=valid
-      ? `Detecció provisional: ${Math.round(score*100)}% de la zona · confiança ${Math.round(confidence*100)}%. Captura no desada.`
-      : 'Aquesta captura no mostra una transició prou clara. Ajusta la zona o la il·luminació i torna-ho a provar. Captura no desada.';
-    renderRoi();
-  }catch(error){
-    if(error.name!=='AbortError'){roiMessage.textContent=error.message==='Sessió caducada'?error.message:`${error.message} Torna-ho a provar.`;testRoiButton.disabled=false;}
-  }finally{if(previewRequest===controller)previewRequest=null;}
-}
-calibration.addEventListener('toggle',async()=>{
-  const image=$('growth-preview');
-  if(!calibration.open){
-    previewRequest?.abort();previewRequest=null;
-    if(freshPreviewUrl){URL.revokeObjectURL(freshPreviewUrl);freshPreviewUrl=null;}
-    image.removeAttribute('src');image.dataset.photo='';saveRoiButton.disabled=true;testRoiButton.disabled=true;
-    return;
-  }
-  await captureRoiPreview();
-});
-testRoiButton.addEventListener('click',captureRoiPreview);
+$('calibration-minus').addEventListener('click',()=>adjustCalibrationGuide(-1));
+$('calibration-plus').addEventListener('click',()=>adjustCalibrationGuide(1));
+function cameraWindow(){const value=$('camera-range').value;if(value==='custom'){return {start:cameraRangeStart,end:cameraRangeEnd};}const now=Date.now();return {start:value==='all'?null:now-Number(value)*3600000,end:now};}
+function samplePhotos(rows){const minutes=$('photo-sampling').value;if(minutes==='all'||rows.length<2)return rows;const ordered=rows.slice().sort((a,b)=>new Date(a.captured_at)-new Date(b.captured_at));const result=[ordered.at(-1)];let cutoff=new Date(ordered.at(-1).captured_at).getTime()-Number(minutes)*60000;for(let i=ordered.length-2;i>=0;i--){const t=new Date(ordered[i].captured_at).getTime();if(t<=cutoff){result.push(ordered[i]);cutoff=t-Number(minutes)*60000;}}return result;}
 
 function renderFermenter(data,historyData=null) {
   historyData=historyData||fermenterHistoryCache;
   const {config,runtime,schedule}=data,form=$('fermenter-form');
   $('fermenter-temperature').textContent=runtime.temperature_c===null?'— °C':`${Number(runtime.temperature_c).toFixed(1)} °C`;
   $('fermenter-target').textContent=`${Number(config.target_c).toFixed(1).replace('.',',')} °C`;
-  $('fermenter-mode-label').textContent={stopped:'Aturat',automatic:'Automàtic · simulació',manual:'Manual · simulació'}[config.mode]||config.mode;
-  $('fermenter-heater').textContent=runtime.simulated_heater_on?'ON · SIMULAT':'OFF · SIMULAT';
-  $('fermenter-heater').classList.toggle('sim-on',Boolean(runtime.simulated_heater_on));
+  const real=Boolean(data.real_output_control_enabled);
+  $('fermenter-control-badge').textContent=real?'CONTROL REAL · SHELLY switch:0':'SIMULACIÓ · SENSE ORDRES REALS';
+  $('fermenter-safety-banner').textContent=real?'Control habilitat amb watchdog local al Shelly; el control continua subjecte al tall tèrmic físic independent.':data.physical_control_block_reason||'Control real bloquejat fins que es verifiquin les proteccions físiques.';
+  $('fermenter-demand-label').textContent=real?'Sortida real de la manta':'Demanda simulada';
+  $('fermenter-mode-label').textContent={stopped:'Aturat',automatic:real?'Automàtic · real':'Automàtic · simulació',manual:real?'Manual · real':'Manual · simulació'}[config.mode]||config.mode;
+  const heaterOn=real?runtime.switch0_on===true:Boolean(runtime.simulated_heater_on);
+  $('fermenter-heater').textContent=heaterOn?'ON':'OFF';
+  $('fermenter-heater').classList.toggle('sim-on',heaterOn);
+  $('home-control-demand-label').textContent=real?'Sortida de calefacció':'Demanda de calefacció simulada';
+  $('home-control-demand').textContent=heaterOn?'ON':'OFF';
+  $('home-control-mode').textContent=`${real?'Control real':'Simulació'} · ${{stopped:'Aturat',automatic:'Automàtic',manual:'Manual'}[config.mode]||config.mode}`;
+  $('home-control-target').textContent=`${Number(config.target_c).toFixed(1)} °C`;
+  $('home-physical-output').textContent=runtime.switch0_on===null?'Desconeguda':runtime.switch0_on?'ON':'OFF';
   const fresh=runtime.sensor_fresh;
   $('fermenter-sensor-status').textContent=fresh?`DHT22 · fa ${runtime.sensor_age_seconds}s`:`Sense lectura fiable · ${runtime.error||'dada caducada'}`;
   $('fermenter-sensor-status').style.color=fresh?'':'var(--red)';
-  const outputs=[runtime.switch0_on,runtime.switch1_on].map((value,i)=>`Canal ${i} ${value===null?'?':value?'ON':'OFF'}`).join(' · ');
-  $('fermenter-physical-outputs').textContent=`Sortides físiques Shelly (càrrega no identificada): ${outputs}`;
-  $('home-control-mode').textContent=`Control en simulació · ${{stopped:'Aturat',automatic:'Automàtic',manual:'Manual'}[config.mode]||config.mode}`;
-  $('home-control-target').textContent=`${Number(config.target_c).toFixed(1).replace('.',',')} °C`;
-  $('home-control-demand').textContent=runtime.simulated_heater_on?'ON · SIMULAT':'OFF · SIMULAT';
-  $('home-physical-output').textContent=outputs;
+  const outputs=runtime.switch0_on===null?'desconeguda':runtime.switch0_on?'ON':'OFF';
+  $('fermenter-physical-outputs').textContent=`Shelly switch:0 (manta confirmada): ${outputs}`;
   const since=runtime.heater_on_since?Math.max(0,Math.floor((Date.now()-new Date(runtime.heater_on_since))/1000)):null;
-  $('fermenter-timer').textContent=runtime.simulated_heater_on&&since!==null?`Encès simulat · ${Math.floor(since/60)} min ${since%60}s`:`${runtime.reason||'Aturat'}`;
+  $('fermenter-timer').textContent=heaterOn&&since!==null?`Encès · ${Math.floor(since/60)} min ${since%60}s`:`${runtime.reason||'Aturat'}`;
   $('fermenter-schedule').textContent=schedule.next_change?`${schedule.label} · canvi ${fmtTime(schedule.next_change)}`:schedule.label;
   $('fermenter-alert').hidden=!(runtime.error||runtime.lockout_reason||(!fresh&&runtime.observed_at));
-  $('fermenter-alert').textContent=runtime.lockout_reason?`ALARMA BLOQUEJADA: ${runtime.lockout_reason}. La demanda simulada és OFF.`:runtime.error?`Alarma de comunicació: ${runtime.error}. Demanda simulada OFF.`:!fresh&&runtime.observed_at?'La lectura del DHT22 és massa antiga. Demanda simulada OFF.':'';
+  $('fermenter-alert').textContent=runtime.lockout_reason?`ALARMA BLOQUEJADA: ${runtime.lockout_reason}. Calefacció desactivada.`:runtime.error?`Alarma de comunicació: ${runtime.error}. Calefacció desactivada.`:!fresh&&runtime.observed_at?'La lectura del DHT22 és massa antiga. Calefacció desactivada.':'';
   $('ack-fermenter-alarm').hidden=!runtime.lockout_reason;
   const values={mode:config.mode,target_c:config.target_c,hysteresis_c:config.hysteresis_c,
     min_switch_seconds:config.min_switch_seconds,max_on_seconds:Math.round(config.max_on_seconds/60),
@@ -312,40 +272,50 @@ function selectPhoto(id){
   image.src=`/photos/${encodeURIComponent(photo.filename)}`;
   $('camera-current-time').textContent=`${new Date(photo.captured_at).toLocaleString('ca-ES')}${photo.fermentation_id?` · fermentació #${photo.fermentation_id}`:''}`;
   $('photo-previous').disabled=index===0;$('photo-next').disabled=index===photoLibrary.length-1;
-  if(!$('camera-compare').hidden)renderComparison();
+  $('photo-timeline').value=String(index);
+  renderGrowth({calibration:growthCalibration});drawGrowthChart(growthHistoryCache);
 }
-function renderComparison(){
-  const photo=photoLibrary.find(item=>String(item.id)===$('photo-compare-select').value);
-  if(!photo)return;
-  $('camera-compare-image').src=`/photos/${encodeURIComponent(photo.filename)}`;
-  $('camera-compare-time').textContent=new Date(photo.captured_at).toLocaleString('ca-ES');
+function selectReference(id){
+  const photo=allPhotos.find(item=>String(item.id)===String(id));if(!photo)return;
+  selectedReferenceId=photo.id;$('photo-reference-select').value=String(photo.id);
+  $('camera-reference-image').src=`/photos/${encodeURIComponent(photo.filename)}`;
+  $('camera-reference-time').textContent=new Date(photo.captured_at).toLocaleString('ca-ES');
+  if(growthCalibration?.photo_id!==photo.id){let a={};try{a=JSON.parse(photo.analysis_json||'{}')}catch{};growthCalibration={left_x:growthCalibration?.left_x??.32,right_x:growthCalibration?.right_x??.68,bottom_y:.94,initial_surface_y:Number.isFinite(a.surface_y_ratio)?a.surface_y_ratio:.72,photo_id:photo.id,captured_at:photo.captured_at};}
+  renderCalibrationGuides();
 }
 function renderPhotoLibrary(rows){
-  const selected=$('photo-select').value,compareSelected=$('photo-compare-select').value;
-  photoLibrary=rows.filter(item=>item.camera_ok&&item.filename).slice().reverse();
+  const selected=$('photo-select').value,refSelected=selectedReferenceId;
+  allPhotos=rows.filter(item=>item.camera_ok&&item.filename).slice().sort((a,b)=>new Date(a.captured_at)-new Date(b.captured_at));
+  const reference=growthCalibration?.photo_id||selectedReferenceId;
+  const referencePhoto=allPhotos.find(p=>String(p.id)===String(reference));
+  const refTime=referencePhoto?new Date(referencePhoto.captured_at).getTime():-Infinity;
+  photoLibrary=allPhotos.filter(item=>new Date(item.captured_at).getTime()>=refTime&&inCameraRange(item.captured_at));
   $('camera-library-count').textContent=`${photoLibrary.length} ${photoLibrary.length===1?'imatge':'imatges'}`;
-  const currentSelect=$('photo-select'),comparisonSelect=$('photo-compare-select');
-  currentSelect.replaceChildren();comparisonSelect.replaceChildren();
+  const currentSelect=$('photo-select'),referenceSelect=$('photo-reference-select');
+  currentSelect.replaceChildren();referenceSelect.replaceChildren();
   photoLibrary.forEach((photo,index)=>{
     const label=`${new Date(photo.captured_at).toLocaleString('ca-ES')}${photo.fermentation_id?` · #${photo.fermentation_id}`:''}`;
-    for(const select of [currentSelect,comparisonSelect]){const option=document.createElement('option');option.value=String(photo.id);option.textContent=label;select.append(option);}
+  {const option=document.createElement('option');option.value=String(photo.id);option.textContent=label;currentSelect.append(option);}
   });
-  if(!photoLibrary.length){currentSelect.innerHTML='<option value="">Encara no hi ha captures</option>';comparisonSelect.replaceChildren();$('camera-current-image').removeAttribute('src');$('camera-current-time').textContent='No hi ha captures disponibles.';return;}
+  allPhotos.forEach(photo=>{const option=document.createElement('option');option.value=String(photo.id);option.textContent=new Date(photo.captured_at).toLocaleString('ca-ES');referenceSelect.append(option);});
+  const slider=$('photo-timeline');slider.max=String(Math.max(0,photoLibrary.length-1));slider.disabled=photoLibrary.length<2;
+  if(!photoLibrary.length){currentSelect.innerHTML='<option value="">No hi ha captures en aquest període</option>';referenceSelect.replaceChildren();$('camera-current-image').removeAttribute('src');$('camera-reference-image').removeAttribute('src');$('camera-current-time').textContent='No hi ha captures disponibles en aquest període.';$('camera-reference-time').textContent='—';$('comparison-growth').textContent='Sense dades dins del període';$('photo-count').textContent='0 imatges';$('photo-grid').replaceChildren();return;}
   currentSelect.value=photoLibrary.some(photo=>String(photo.id)===selected)?selected:String(photoLibrary.at(-1).id);
-  comparisonSelect.value=photoLibrary.some(photo=>String(photo.id)===compareSelected)?compareSelected:String(photoLibrary[Math.max(0,photoLibrary.length-2)].id);
-  selectPhoto(currentSelect.value);renderComparison();
+  const ref=allPhotos.find(photo=>String(photo.id)===String(refSelected))||referencePhoto||photoLibrary[0];
+  selectReference(ref.id);selectPhoto(currentSelect.value);
   const grid=$('photo-grid');grid.replaceChildren();
-  const recent=photoLibrary.slice(-24).reverse();
-  $('photo-count').textContent=`${photoLibrary.length} ${photoLibrary.length===1?'imatge':'imatges'}`;
+  const recent=samplePhotos(photoLibrary).slice().reverse();
+  $('photo-count').textContent=`${recent.length} mostrades · ${photoLibrary.length} originals`;
   recent.forEach(item=>{const a=document.createElement('a');a.className='photo-item';a.href=`/photos/${encodeURIComponent(item.filename)}`;a.target='_blank';a.rel='noopener';
     const img=document.createElement('img');img.loading='lazy';img.src=a.href;img.alt=`Captura ${fmtTime(item.captured_at)}`;const time=document.createElement('time');time.textContent=fmtTime(item.captured_at);a.append(img,time);grid.append(a);});
 }
 
 async function refresh() {
   try {
+    setCameraWindow();
     const [state,readings,photos,growth,growthHistory,monitoring,fermenter,fermenterHistoryData,fermentationData]=await Promise.all([
-      json('/api/state'),json(`/api/readings?hours=${$('range').value}`),json('/api/photos?limit=500'),
-      json('/api/growth'),json('/api/growth/history?limit=500'),json('/api/monitoring'),json('/api/fermenter'),
+      json('/api/state'),json(`/api/readings?hours=${$('range').value}`),json('/api/photos?limit=10000'),
+      json('/api/growth'),json('/api/growth/history?limit=20000'),json('/api/monitoring'),json('/api/fermenter'),
       json(`/api/fermenter/history?hours=${$('range').value}`),refreshFermentation()
     ]);
     readingsCache=readings;growthHistoryCache=growthHistory;
@@ -360,33 +330,33 @@ async function refresh() {
     const latestImage=$('home-camera-image');
     if(photo?.camera_ok&&photo.filename){latestImage.src=`/photos/${encodeURIComponent(photo.filename)}`;latestImage.hidden=false;$('home-camera-time').textContent=`Captura ${new Date(photo.captured_at).toLocaleString('ca-ES')}`;}
     else{latestImage.removeAttribute('src');latestImage.hidden=true;$('home-camera-time').textContent=photo?`Darrera prova de càmera ${fmtTime(photo.captured_at)} · sense imatge vàlida`:'Encara no hi ha cap fotografia disponible.';}
-    drawChart(readings);drawGrowthChart(growthHistory);renderGrowth(growth);renderPhotoLibrary(photos);
+    drawChart(readings);growthCalibration=growth.calibration||growthCalibration;renderPhotoLibrary(photos);renderGrowth(growth);
     renderFermentations();
   }catch(error){if(error.message!=='Sessió caducada')console.warn('No s’ha pogut actualitzar el dashboard',error);}
 }
 
 $('photo-select').addEventListener('change',event=>selectPhoto(event.currentTarget.value));
-$('photo-compare-select').addEventListener('change',renderComparison);
+$('photo-reference-select').addEventListener('change',event=>selectReference(event.currentTarget.value));
 $('photo-previous').addEventListener('click',()=>{const i=photoLibrary.findIndex(photo=>String(photo.id)===$('photo-select').value);if(i>0)selectPhoto(photoLibrary[i-1].id);});
 $('photo-next').addEventListener('click',()=>{const i=photoLibrary.findIndex(photo=>String(photo.id)===$('photo-select').value);if(i>=0&&i<photoLibrary.length-1)selectPhoto(photoLibrary[i+1].id);});
-$('compare-toggle').addEventListener('click',event=>{const panel=$('camera-compare');panel.hidden=!panel.hidden;event.currentTarget.setAttribute('aria-pressed',String(!panel.hidden));event.currentTarget.textContent=panel.hidden?'Compara dues imatges':'Amaga la comparació';if(!panel.hidden)renderComparison();});
+$('photo-timeline').addEventListener('input',event=>{const photo=photoLibrary[Number(event.currentTarget.value)];if(photo)selectPhoto(photo.id);});
 $('timelapse-toggle').addEventListener('click',event=>{
   if(timelapseTimer){clearInterval(timelapseTimer);timelapseTimer=null;event.currentTarget.textContent='Reprodueix timelapse';return;}
   if(photoLibrary.length<2)return;
-  let index=0;event.currentTarget.textContent='Atura el timelapse';selectPhoto(photoLibrary[index].id);
-  timelapseTimer=setInterval(()=>{index=(index+1)%photoLibrary.length;selectPhoto(photoLibrary[index].id);},1500);
+  let index=photoLibrary.findIndex(photo=>String(photo.id)===$('photo-select').value);if(index<0)index=0;event.currentTarget.textContent='Atura el timelapse';
+  timelapseTimer=setInterval(()=>{if(index>=photoLibrary.length-1){clearInterval(timelapseTimer);timelapseTimer=null;event.currentTarget.textContent='Reprodueix timelapse';return;}index++;selectPhoto(photoLibrary[index].id);},Math.max(75,1500/Number($('timelapse-speed').value)));
 });
 
-$('baseline-button').addEventListener('click',async()=>{
-  $('growth-detail').textContent='Desant el nivell d’aquesta captura com a referència…';
-  try{await json('/api/growth/calibrate',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});await refresh();}
-  catch(error){$('growth-detail').textContent=error.message;}
+$('baseline-button').addEventListener('click',()=>{
+  const photo=photoLibrary.find(p=>String(p.id)===$('photo-select').value);if(!photo)return;
+  selectReference(photo.id);$('growth-detail').textContent='La captura seleccionada és ara l’inici. Ajusta les quatre línies i desa el calibratge.';
 });
-$('save-roi').addEventListener('click',async()=>{
-  $('roi-message').textContent='Desant i comprovant la zona…';
-  try{const data=await json('/api/growth/roi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(roi)});renderGrowth(data);$('roi-message').textContent='Zona desada. La captura següent farà servir aquest retall.';await refresh();}
-  catch(error){$('roi-message').textContent=`No s’ha pogut desar: ${error.message}`;}
+$('calibration-save').addEventListener('click',async()=>{
+  const photo=allPhotos.find(p=>String(p.id)===String(growthCalibration?.photo_id));if(!photo){$('growth-detail').textContent='Selecciona una fotografia de referència vàlida.';return;}
+  try{const result=await json('/api/growth/calibration',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...growthCalibration,photo_id:photo.id})});growthCalibration=result.calibration;$('growth-detail').textContent='Calibratge desat. La referència queda guardada.';await refresh();}
+  catch(error){$('growth-detail').textContent=`No s’ha pogut desar el calibratge: ${error.message}`;}
 });
+$('calibration-reset').addEventListener('click',async()=>{try{await json('/api/growth/calibration',{method:'DELETE'});growthCalibration=null;selectedReferenceId=null;renderCalibrationGuides();renderGrowth({calibration:null});$('growth-detail').textContent='Calibratge persistent esborrat. Les fotografies i lectures no s’han modificat.';}catch(error){$('growth-detail').textContent=`No s’ha pogut restablir: ${error.message}`;}});
 
 $('monitoring-button').addEventListener('click',async()=>{
   const button=$('monitoring-button');button.disabled=true;
@@ -403,7 +373,7 @@ $('fermenter-form').addEventListener('submit',async event=>{
     continuous:form.elements.continuous.checked,schedule_enabled:form.elements.schedule_enabled.checked,
     schedule_start:form.elements.schedule_start.value,schedule_end:form.elements.schedule_end.value,
     manual_on:form.elements.manual_on.checked};
-  try{const result=await json('/api/fermenter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});renderFermenter(result);feedback.textContent='Configuració desada. Només afecta la simulació.';}
+  try{const result=await json('/api/fermenter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});renderFermenter(result);feedback.textContent=result.real_output_control_enabled?'Configuració desada; control real de switch:0 habilitat.':'Configuració desada només per a la simulació.';}
   catch(error){feedback.textContent=`No s’ha pogut desar: ${error.message}`;}
 });
 document.querySelectorAll('[data-step]').forEach(button=>button.addEventListener('click',()=>{
@@ -430,8 +400,13 @@ $('event-form').addEventListener('submit',async event=>{
   catch(error){feedback.textContent=`No s’ha pogut desar: ${error.message}`;}
 });
 
-$('range').addEventListener('change',refresh);let timer;
+$('range').addEventListener('change',refresh);
+function setCameraWindow(){const value=$('camera-range').value;const now=Date.now();if(value==='all'){cameraRangeStart=cameraRangeEnd=null;}else if(value==='custom'){cameraRangeStart=$('camera-start').value?new Date($('camera-start').value).getTime():null;cameraRangeEnd=$('camera-end').value?new Date($('camera-end').value).getTime():null;}else{cameraRangeStart=now-Number(value)*3600000;cameraRangeEnd=now;}}
+$('camera-range').addEventListener('change',()=>{$('camera-custom-range').hidden=$('camera-range').value!=='custom';refresh();});
+$('camera-apply-range').addEventListener('click',refresh);$('photo-sampling').addEventListener('change',()=>refresh());
+$('timelapse-speed').addEventListener('change',()=>{if(timelapseTimer){clearInterval(timelapseTimer);timelapseTimer=null;$('timelapse-toggle').click();}});
+let timer;
 window.addEventListener('resize',()=>{clearTimeout(timer);timer=setTimeout(refresh,200)});
 showPage(location.hash.slice(1),false);refresh();setInterval(refresh,30000);
 setInterval(refreshFermenterOnly,5000);
-if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.7.0',{updateViaCache:'none'}).catch(()=>{});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.8.0',{updateViaCache:'none'}).catch(()=>{});

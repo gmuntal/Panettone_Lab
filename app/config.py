@@ -15,6 +15,12 @@ class Settings:
     shelly_url: str = os.getenv("SHELLY_URL", "http://10.85.3.202/rpc/Shelly.GetStatus")
     shelly_username: str = os.getenv("SHELLY_USERNAME", "")
     shelly_password: str = os.getenv("SHELLY_PASSWORD", "")
+    shelly_output_id: int = int(os.getenv("SHELLY_HEATER_OUTPUT_ID", "0"))
+    shelly_real_control_enabled: bool = os.getenv("SHELLY_REAL_CONTROL_ENABLED", "false").lower() == "true"
+    shelly_wiring_verified: bool = os.getenv("SHELLY_HEATER_WIRING_VERIFIED", "false").lower() == "true"
+    shelly_cutoff_verified: bool = os.getenv("SHELLY_THERMAL_CUTOFF_VERIFIED", "false").lower() == "true"
+    shelly_restart_off_verified: bool = os.getenv("SHELLY_RESTART_OFF_VERIFIED", "false").lower() == "true"
+    shelly_watchdog_seconds: int = int(os.getenv("SHELLY_OUTPUT_WATCHDOG_SECONDS", "15"))
     temperature_key: str = os.getenv("TEMPERATURE_KEY", "temperature:100.tC")
     humidity_key: str = os.getenv("HUMIDITY_KEY", "humidity:100.rh")
     camera_rtsp_url: str = os.getenv("CAMERA_RTSP_URL", "rtsp://10.85.3.237:554/stream1")
@@ -36,3 +42,13 @@ def validate_settings() -> None:
         raise RuntimeError("READONLY_API_TOKEN must have at least 32 characters when configured")
     if settings.sensor_interval_seconds < 5 or settings.photo_interval_seconds < 30:
         raise RuntimeError("Polling intervals are too short")
+    if settings.shelly_output_id != 0:
+        raise RuntimeError("Only the user-confirmed Shelly output 0 is supported for the heater")
+    if settings.shelly_watchdog_seconds < 10 or settings.shelly_watchdog_seconds > 60:
+        raise RuntimeError("SHELLY_OUTPUT_WATCHDOG_SECONDS must be 10–60 seconds")
+
+
+def shelly_real_control_ready() -> bool:
+    return (settings.shelly_real_control_enabled and settings.shelly_wiring_verified
+            and settings.shelly_cutoff_verified and settings.shelly_restart_off_verified
+            and settings.shelly_output_id == 0)

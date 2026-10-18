@@ -18,6 +18,36 @@ def read_shelly_components():
     return response.json()
 
 
+def set_shelly_heater_output(on, watchdog_seconds=15):
+    """Set the confirmed heater output; ON calls carry a Shelly-side lease."""
+    from .config import shelly_real_control_ready
+    if not shelly_real_control_ready():
+        raise RuntimeError("Control real Shelly bloquejat per configuració de seguretat")
+    url = settings.shelly_url.rsplit("/rpc/", 1)[0] + "/rpc/Switch.Set"
+    auth = HTTPDigestAuth(settings.shelly_username, settings.shelly_password) if settings.shelly_username else None
+    params = {"id": 0, "on": bool(on), "tag": "PanettoneLab"}
+    if on:
+        params["toggle_after"] = int(watchdog_seconds)
+    response = requests.post(url, json=params, auth=auth, timeout=4)
+    response.raise_for_status()
+    result = response.json()
+    if not isinstance(result, dict) or not isinstance(result.get("was_on"), bool):
+        raise RuntimeError("El Shelly no ha confirmat Switch.Set")
+    return result
+
+
+def read_shelly_heater_output():
+    """Read back switch:0 so the UI never treats a requested state as observed."""
+    url = settings.shelly_url.rsplit("/rpc/", 1)[0] + "/rpc/Switch.GetStatus"
+    auth = HTTPDigestAuth(settings.shelly_username, settings.shelly_password) if settings.shelly_username else None
+    response = requests.get(url, params={"id": 0}, auth=auth, timeout=4)
+    response.raise_for_status()
+    output = response.json().get("output")
+    if not isinstance(output, bool):
+        raise RuntimeError("No s’ha pogut llegir l’estat real de switch:0")
+    return output
+
+
 def read_shelly():
     payload = read_shelly_components()
     temperature = payload

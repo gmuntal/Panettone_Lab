@@ -6,10 +6,27 @@ unavailable instead of manufacturing a measurement.
 """
 
 import json
+import math
 DEFAULT_ROI = {"x0": 0.36, "y0": 0.32, "x1": 0.58, "y1": 0.95}
 DETECTOR_VERSION = 2
 INITIAL_MAX_HEIGHT_RATIO = 0.55
 TRACKING_TOLERANCE = 0.18
+
+
+def growth_from_surface(bottom_y, initial_surface_y, current_surface_y):
+    """Return height factor and percent growth from normalized image coordinates."""
+    try:
+        bottom_y, initial_surface_y, current_surface_y = map(
+            float, (bottom_y, initial_surface_y, current_surface_y))
+    except (TypeError, ValueError):
+        return None
+    initial_height = bottom_y - initial_surface_y
+    current_height = bottom_y - current_surface_y
+    if (not all(map(math.isfinite, (bottom_y, initial_surface_y, current_surface_y))) or
+            initial_height <= 0 or current_height <= 0):
+        return None
+    factor = current_height / initial_height
+    return {"factor": round(factor, 3), "percent": round((factor - 1) * 100, 1)}
 
 
 def _otsu_threshold(histogram):
