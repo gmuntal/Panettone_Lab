@@ -1,6 +1,7 @@
 import os
 import json
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -15,6 +16,7 @@ def utc_now() -> str:
 def init_db() -> None:
     os.makedirs(settings.data_dir, exist_ok=True)
     os.makedirs(settings.photo_dir, exist_ok=True)
+    _backup_before_v010_migration()
     with connect() as db:
         db.executescript("""
         PRAGMA journal_mode=WAL;
@@ -35,7 +37,10 @@ def init_db() -> None:
             growth_detected INTEGER,
             analysis_json TEXT,
             camera_ok INTEGER NOT NULL DEFAULT 0,
-            error TEXT
+            error TEXT,
+            important INTEGER NOT NULL DEFAULT 0,
+            archived_at TEXT,
+            archived_filename TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_photos_captured ON photos(captured_at);
         CREATE TABLE IF NOT EXISTS growth_settings (
@@ -59,7 +64,11 @@ def init_db() -> None:
             initial_ph REAL,
             initial_dough_temp_c REAL,
             target_fermenter_temp_c REAL,
-            notes TEXT
+            notes TEXT,
+            archived_at TEXT,
+            archive_filename TEXT,
+            archive_sample_minutes INTEGER,
+            archive_saved_bytes INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_fermentations_started ON fermentations(started_at);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_fermentations_one_active
@@ -124,6 +133,34 @@ def init_db() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_fermenter_actions_time ON fermenter_actions(occurred_at,id);
         CREATE INDEX IF NOT EXISTS idx_fermenter_actions_fermentation ON fermenter_actions(fermentation_id,occurred_at);
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            endpoint TEXT PRIMARY KEY,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_sent_at TEXT,
+            last_error TEXT
+        );
+        CREATE TABLE IF NOT EXISTS push_preferences (
+            id INTEGER PRIMARY KEY CHECK(id=1),
+            critical_enabled INTEGER NOT NULL DEFAULT 1,
+            warning_enabled INTEGER NOT NULL DEFAULT 1,
+            fermentation_enabled INTEGER NOT NULL DEFAULT 1,
+            storage_enabled INTEGER NOT NULL DEFAULT 1,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS push_outbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dedupe_key TEXT NOT NULL UNIQUE,
+            category TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            sent_at TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_push_outbox_pending ON push_outbox(sent_at,created_at);
         """)
         # Add nullable links in place. Existing readings and photographs remain untouched.
         for table in ("readings", "photos"):
@@ -131,12 +168,55 @@ def init_db() -> None:
             if "fermentation_id" not in columns:
                 db.execute(f"ALTER TABLE {table} ADD COLUMN fermentation_id INTEGER REFERENCES fermentations(id)")
             db.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_fermentation ON {table}(fermentation_id)")
+        photo_columns = {row[1] for row in db.execute("PRAGMA table_info(photos)")}
+        for name, declaration in (("important", "INTEGER NOT NULL DEFAULT 0"),
+                                  ("archived_at", "TEXT"), ("archived_filename", "TEXT")):
+            if name not in photo_columns:
+                db.execute(f"ALTER TABLE photos ADD COLUMN {name} {declaration}")
+        fermentation_columns = {row[1] for row in db.execute("PRAGMA table_info(fermentations)")}
+        for name, declaration in (("archived_at", "TEXT"), ("archive_filename", "TEXT"),
+                                  ("archive_sample_minutes", "INTEGER"), ("archive_saved_bytes", "INTEGER")):
+            if name not in fermentation_columns:
+                db.execute(f"ALTER TABLE fermentations ADD COLUMN {name} {declaration}")
         db.execute("INSERT OR IGNORE INTO monitoring_control(id,active,changed_at) VALUES(1,0,?)",
                    (utc_now(),))
         db.execute("INSERT OR IGNORE INTO fermenter_settings(id,updated_at) VALUES(1,?)", (utc_now(),))
         db.execute("INSERT OR IGNORE INTO fermenter_runtime(id) VALUES(1)")
+        db.execute("INSERT OR IGNORE INTO push_preferences(id,updated_at) VALUES(1,?)", (utc_now(),))
     from .growth_analysis import initialize
     initialize()
+
+
+def _backup_before_v010_migration():
+    path = settings.database_path
+    if not os.path.isfile(path) or os.path.getsize(path) == 0:
+        return
+    source = sqlite3.connect(path, timeout=15)
+    try:
+        tables = {row[0] for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not tables:
+            return
+        photo_columns = {row[1] for row in source.execute("PRAGMA table_info(photos)")} if "photos" in tables else set()
+        fermentation_columns = ({row[1] for row in source.execute("PRAGMA table_info(fermentations)")}
+                                if "fermentations" in tables else set())
+        needs_backup = ("important" not in photo_columns or "archived_at" not in photo_columns
+                        or "archived_at" not in fermentation_columns
+                        or "push_subscriptions" not in tables)
+        if not needs_backup:
+            return
+        backup_dir = os.path.join(settings.data_dir, "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        destination_path = os.path.join(backup_dir, f"pre-v0.10.0-{time.time_ns()}.sqlite3")
+        destination = sqlite3.connect(destination_path)
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+        os.chmod(destination_path, 0o600)
+    except Exception as exc:
+        raise RuntimeError("No es pot fer una còpia coherent de SQLite abans de la migració v0.10.0") from exc
+    finally:
+        source.close()
 
 
 def monitoring_state():
@@ -203,7 +283,13 @@ def start_fermentation(fields):
             fields.get("initial_dough_temp_c"), fields.get("target_fermenter_temp_c"), fields.get("notes")))
         db.execute("INSERT INTO events(fermentation_id,occurred_at,event_type,details) VALUES(?,?,?,?)",
                    (cursor.lastrowid, started_at, "fermentation_start", "Inici de fermentació"))
-        return dict(db.execute("SELECT * FROM fermentations WHERE id=?", (cursor.lastrowid,)).fetchone())
+        result = dict(db.execute("SELECT * FROM fermentations WHERE id=?", (cursor.lastrowid,)).fetchone())
+    try:
+        from .push import enqueue
+        enqueue("fermentation", "Fermentació iniciada", "S’ha iniciat una fermentació nova.", f"fermentation-start:{result['id']}")
+    except Exception:
+        pass
+    return result
 
 
 def end_fermentation(fermentation_id):
@@ -215,7 +301,14 @@ def end_fermentation(fermentation_id):
             db.execute("INSERT INTO events(fermentation_id,occurred_at,event_type,details) VALUES(?,?,?,?)",
                        (fermentation_id, ended_at, "fermentation_end", "Final de fermentació"))
         row = db.execute("SELECT * FROM fermentations WHERE id=?", (fermentation_id,)).fetchone()
-        return dict(row) if row else None
+        result = dict(row) if row else None
+    if result and result.get("ended_at") == ended_at:
+        try:
+            from .push import enqueue
+            enqueue("fermentation", "Fermentació finalitzada", f"La fermentació #{fermentation_id} ha finalitzat.", f"fermentation-end:{fermentation_id}")
+        except Exception:
+            pass
+    return result
 
 
 def add_event(fields):
@@ -229,7 +322,14 @@ def add_event(fields):
             fields.get("flour_g"), fields.get("water_g"), fields.get("flour_type"),
             fields.get("hydration_pct"), fields.get("ph"), fields.get("dough_temp_c"),
             fields.get("target_temp_c"), fields.get("details")))
-        return dict(db.execute("SELECT * FROM events WHERE id=?", (cursor.lastrowid,)).fetchone())
+        result = dict(db.execute("SELECT * FROM events WHERE id=?", (cursor.lastrowid,)).fetchone())
+    if result["event_type"] == "refresh":
+        try:
+            from .push import enqueue
+            enqueue("fermentation", "Refresc registrat", "S’ha registrat un refresc de la massa mare.", f"refresh:{result['id']}")
+        except Exception:
+            pass
+    return result
 
 
 def growth_config():

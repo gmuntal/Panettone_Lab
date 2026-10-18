@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#174c42">
   <meta name="description" content="Monitoratge local de la fermentació del lievito madre">
-  <link rel="manifest" href="/manifest.webmanifest?v=0.9.0">
-  <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png?v=0.9.0">
-  <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png?v=0.9.0">
-  <link rel="icon" href="/static/icons/favicon.ico?v=0.9.0">
-  <link rel="stylesheet" href="/static/app.css?v=0.9.0">
+  <link rel="manifest" href="/manifest.webmanifest?v=0.10.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png?v=0.10.0">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png?v=0.10.0">
+  <link rel="icon" href="/static/icons/favicon.ico?v=0.10.0">
+  <link rel="stylesheet" href="/static/app.css?v=0.10.0">
   <title>Panettone Lab, by gmuntal · v{{ app_version }}</title>
 </head>
 <body>
-<header class="topbar"><a class="brand" href="/"><img class="brand-mark logo" src="/static/icons/icon-192.png?v=0.9.0" alt=""><span class="brand-copy"><span>Panettone Lab, <em>by gmuntal</em></span><small class="version">v{{ app_version }}</small></span></a><form action="/logout" method="post"><button class="logout" aria-label="Tanca la sessió">Sortir</button></form></header>
+<header class="topbar"><a class="brand" href="/"><img class="brand-mark logo" src="/static/icons/icon-192.png?v={{ app_version }}" alt=""><span class="brand-copy"><span>Panettone Lab, <em>by gmuntal</em></span><small class="version">v{{ app_version }}</small></span></a><form action="/logout" method="post"><button class="logout" aria-label="Tanca la sessió">Sortir</button></form></header>
 <main class="container app-shell">
   <nav class="app-nav" aria-label="Seccions de Panettone Lab">
     <button class="nav-item is-active" type="button" data-view="home" aria-current="page"><span aria-hidden="true">⌂</span><span>Inici</span></button>
@@ -52,11 +52,11 @@
         <p class="muted" id="fermentation-detail-status">Carregant dades registrades…</p>
         <div class="fermentation-detail-grid" id="fermentation-detail-grid"></div>
         <ol class="event-timeline" id="fermentation-timeline"></ol>
-        <a class="secondary-button export-active" id="export-active-fermentation" href="#" hidden>Descarrega dades d’aquesta fermentació</a>
+        <a class="secondary-button export-active" id="export-active-fermentation" href="#" target="_blank" rel="noopener" hidden>Descarrega dades d’aquesta fermentació</a><span id="export-feedback" class="metric-foot" role="status" aria-live="polite"></span>
       </section>
       <details class="panel session-panel" id="session-panel"><summary>Registrar dades i anotacions</summary><p class="muted" id="session-status">Carregant sessions…</p><form id="fermentation-form" class="data-form"><h3>Inicia una fermentació</h3><div class="form-grid"><label>Massa mare (g)<input name="starter_mass_g" type="number" min="0" step="0.1"></label><label>Farina (g)<input name="flour_g" type="number" min="0" step="0.1"></label><label>Aigua (g)<input name="water_g" type="number" min="0" step="0.1"></label><label>Tipus de farina<input name="flour_type" maxlength="120"></label><label>Hidratació (%)<input name="hydration_pct" type="number" min="0" max="500" step="0.1"></label><label>pH inicial<input name="initial_ph" type="number" min="0" max="14" step="0.01"></label><label>Temperatura inicial (°C)<input name="initial_dough_temp_c" type="number" min="-20" max="100" step="0.1"></label><label>Objectiu fermentador (°C)<input name="target_fermenter_temp_c" type="number" min="-20" max="100" step="0.1"></label></div><label>Observacions<input name="notes" maxlength="2000"></label><button class="secondary-button" type="submit">Inicia fermentació</button></form><button class="secondary-button stop-session" id="end-fermentation" type="button" hidden>Finalitza fermentació</button><form id="event-form" class="data-form"><h3>Afegeix una anotació</h3><div class="form-grid"><label>Tipus<select name="event_type"><option value="refresh">Refresc</option><option value="ph_measurement">Mesura de pH</option><option value="dough_temperature">Temperatura de la massa</option><option value="fridge_in">Entrada a la nevera</option><option value="fridge_out">Sortida de la nevera</option><option value="target_temperature">Canvi de consigna</option><option value="manual_note">Observació</option><option value="incident">Incidència</option></select></label><label>Massa mare (g)<input name="starter_mass_g" type="number" min="0" step="0.1"></label><label>Farina (g)<input name="flour_g" type="number" min="0" step="0.1"></label><label>Aigua (g)<input name="water_g" type="number" min="0" step="0.1"></label><label>Tipus de farina<input name="flour_type" maxlength="120"></label><label>Hidratació (%)<input name="hydration_pct" type="number" min="0" max="500" step="0.1"></label><label>pH<input name="ph" type="number" min="0" max="14" step="0.01"></label><label>Temperatura massa (°C)<input name="dough_temp_c" type="number" min="-20" max="100" step="0.1"></label><label>Consigna (°C)<input name="target_temp_c" type="number" min="-20" max="100" step="0.1"></label></div><label>Detalls<input name="details" maxlength="2000"></label><button class="secondary-button" type="submit">Desa anotació</button><span class="metric-foot" id="event-feedback" role="status"></span></form></details>
       </div>
-      <div id="fermentation-archive" data-fermentation-panel="archive" hidden><section class="panel history-panel"><div class="panel-heading"><div><p class="eyebrow">ARXIU</p><h2>Fermentacions anteriors</h2></div><span class="photo-count" id="fermentation-count">—</span></div><div id="fermentation-history" class="fermentation-history"><p class="muted">Carregant historial…</p></div></section></div>
+      <div id="fermentation-archive" data-fermentation-panel="archive" hidden><section class="panel history-panel"><div class="panel-heading"><div><p class="eyebrow">ARXIU</p><h2>Fermentacions anteriors</h2></div><span class="photo-count" id="fermentation-count">—</span></div><label class="archive-sort">Ordena per <select id="fermentation-sort"><option value="date">Data · més recent</option><option value="storage">Espai · més gran</option><option value="photos">Fotografies · més</option></select></label><div id="fermentation-history" class="fermentation-history"><p class="muted">Carregant historial…</p></div></section></div>
     </section>
 
     <section class="page-section" id="page-camera" data-page="camera" hidden>
@@ -81,7 +81,9 @@
         <div class="settings-grid">
           <article><h3>Captura i sensors</h3><p>Lectures ambientals cada <strong>{{ sensor_interval_seconds }} s</strong>.</p><p>Fotografies cada <strong>{{ photo_interval_seconds }} s</strong> quan el seguiment és actiu.</p></article>
           <article><h3>Dispositius locals</h3><p>Shelly Plus UNI · temperatura i humitat ambientals.</p><p>Tapo C210 · fotografies de la fermentadora.</p><p class="muted">Els valors ambientals no són una mesura de la temperatura interna de la massa.</p></article>
-          <article><h3>Control tèrmic</h3><p>La manta tèrmica és Shelly switch:0 segons confirmació de l’usuari. El codi de control real està preparat, però queda desarmat fins a verificar el relé/contactor, el tall tèrmic independent i l’estat segur després d’un reinici del Shelly.</p><p>En mode real, el controlador renova un temporitzador local al Shelly perquè l’ordre ON caduqui a OFF si es perd la Raspberry.</p></article>
+          <article><h3>Control tèrmic</h3><p>La manta tèrmica és Shelly switch:0 segons confirmació de l’usuari. El control real queda desarmat després del desplegament; no s’activarà fins a completar les verificacions de seguretat i una prova supervisada.</p><p>El paràmetre Shelly <code>toggle_after</code> pot retornar la sortida a OFF després d’un temps, però encara s’ha de comprovar en aquest dispositiu que el temporitzador persisteix i talla davant pèrdua de la Raspberry.</p></article>
+          <article><h3>Recursos i emmagatzematge</h3><p id="resource-status">Carregant dades del sistema…</p><div id="resource-details" class="resource-details"></div></article>
+          <article><h3>Notificacions</h3><p id="push-status">Comprovant compatibilitat…</p><button class="secondary-button" id="push-enable" type="button">Activar notificacions</button> <button class="secondary-button" id="push-test" type="button" disabled>Enviar notificació de prova</button><button class="secondary-button" id="push-disable" type="button" hidden>Desactivar notificacions</button><div class="push-preferences"><label><input type="checkbox" data-push-category="critical" checked> Alertes crítiques</label><label><input type="checkbox" data-push-category="warning" checked> Avisos</label><label><input type="checkbox" data-push-category="fermentation" checked> Esdeveniments de fermentació</label><label><input type="checkbox" data-push-category="storage" checked> Poc espai</label></div><p class="metric-foot" id="push-feedback" role="status"></p></article>
           <article><h3>Dades i exportació</h3><p>Fermentacions, lectures, esdeveniments i fotografies es desen al volum SQLite persistent de la Raspberry Pi.</p><p>Descarrega el ZIP des de l’actual o l’historial de fermentacions.</p></article>
           <article><h3>API i ChatGPT</h3><p>Hi ha una API autenticada de només lectura. Per consultar-la des de ChatGPT cal un connector o pont MCP configurat de manera privada.</p><p>No exposis SQLite, la càmera ni el servidor directament a Internet.</p></article>
         </div>
@@ -91,6 +93,6 @@
   </div>
 </main>
 <script src="/static/camera-state.js?v={{ app_version }}" defer></script>
-<script src="/static/app.js?v=0.9.0" defer></script>
+<script src="/static/app.js?v={{ app_version }}" defer></script>
 </body>
 </html>

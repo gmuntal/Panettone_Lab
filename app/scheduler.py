@@ -84,4 +84,24 @@ def start_workers():
         threading.Thread(target=target, args=(stop,), name=name, daemon=True).start()
     from .fermenter import start_worker as fermenter_worker
     threading.Thread(target=fermenter_worker, args=(stop,), name="fermenter-simulation", daemon=True).start()
+    from .push import worker as push_worker
+    threading.Thread(target=push_worker, args=(stop,), name="web-push-delivery", daemon=True).start()
+    threading.Thread(target=resource_alert_loop, args=(stop,), name="resource-monitor", daemon=True).start()
     return stop
+
+
+def resource_alert_loop(stop):
+    """Queue a deduplicated low-disk notification without touching stored data."""
+    from .push import enqueue
+    from .resources import resource_snapshot
+    while not stop.is_set():
+        try:
+            data = resource_snapshot(settings.database_path, settings.photo_dir, settings.data_dir)
+            disk = data.get("system", {}).get("data_disk")
+            if disk and disk.get("used_percent") is not None and disk["used_percent"] >= 85:
+                enqueue("storage", "Poc espai a Panettone Lab",
+                        f"El volum de dades és al {disk['used_percent']}% d’ocupació; en queden {disk['available_bytes']} bytes.",
+                        f"storage-low:{datetime.now().date().isoformat()}")
+        except Exception:
+            log.exception("No s’han pogut revisar els recursos del sistema")
+        stop.wait(300)

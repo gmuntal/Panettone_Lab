@@ -13,7 +13,7 @@ Data de consulta: 17 d’octubre de 2026. Totes les consultes al Shelly s’han 
 
 - Model: **Shelly Plus UNI (SNSN-0043X)**, Gen 2, aplicació `PlusUni`, firmware **1.2.2** (`20240223-142029/1.2.2-g7c39781`).
 - `Uni.GetPeripherals` confirma `dht22` connectat a `temperature:100` i `humidity:100`. Els noms configurats són «Temperatura» i «Humitat». Lectura de la consulta: 29,4 °C i 59,1 % RH.
-- Hi ha dues sortides: `switch:0` i `switch:1`, ambdues sense nom configurat i apagades en el moment de la consulta. Els estats només descriuen el Shelly; **no identifiquen quin cable o càrrega governa cada sortida**.
+- Hi ha dues sortides: `switch:0` i `switch:1`, ambdues sense nom configurat en la consulta original. Després d'aquesta auditoria, l'usuari ha confirmat que `switch:0=true` encén la manta i `switch:0=false` l'apaga. La confirmació identifica el canal de control, però l'estat RPC no verifica el corrent elèctric ni substitueix la inspecció de les proteccions físiques.
 - `switch:0`: `in_mode=follow`, `initial_state=restore_last`; temporitzadors `auto_on` i `auto_off` desactivats.
 - `switch:1`: `in_mode=follow`, `initial_state=match_input`; temporitzadors `auto_on` i `auto_off` desactivats.
 - Les entrades digitals 0 i 1 estaven a `false`; l’entrada de comptatge 2 està desactivada.
@@ -34,8 +34,8 @@ Data de consulta: 17 d’octubre de 2026. Totes les consultes al Shelly s’han 
 - Després d’un reinici de l’aplicació, tornar a aturat i demanda virtual OFF; conservar consigna/configuració i historial.
 - Desar canvis, transicions i alarmes a SQLite vinculats a la fermentació activa. Reutilitzar lectures existents de 30 s per a la gràfica i consultar l’estat Shelly a l’interval curt del simulador.
 - Per al control real futur caldrà primer identificar i validar el camí elèctric, configurar al Shelly un estat segur i un watchdog autònom, i provar el sistema sense càrrega abans d’una activació supervisada. El watchdog ha de continuar apagant la calefacció encara que la Raspberry o la xarxa caiguin.
-- El codi només arma l’accionament quan `SHELLY_REAL_CONTROL_ENABLED`, `SHELLY_HEATER_WIRING_VERIFIED`, `SHELLY_THERMAL_CUTOFF_VERIFIED` i `SHELLY_RESTART_OFF_VERIFIED` són `true`. Totes són `false` per defecte. Amb demanda ON, cada refresc RPC inclou `toggle_after` perquè el Shelly retorni a OFF si la Raspberry deixa de renovar l’ordre. Aquest lloguer de sortida no protegeix contra reinicis del mateix Shelly i no substitueix un tall tèrmic físic.
-- La confirmació de `switch:0` identifica el canal de control, però no demostra que el circuit real tingui un relé/contactor adequat, ni que el tall físic sigui funcional. L’auditoria remota anterior va trobar `initial_state=restore_last`; no s’ha modificat el Shelly ni s’ha enviat cap ordre de sortida durant aquest canvi.
+- El codi només arma l’accionament quan `SHELLY_REAL_CONTROL_ENABLED`, `SHELLY_HEATER_WIRING_VERIFIED`, `SHELLY_THERMAL_CUTOFF_VERIFIED`, `SHELLY_RESTART_OFF_VERIFIED` i `SHELLY_WATCHDOG_VERIFIED` són `true`. Totes són `false` per defecte. Amb demanda ON, cada refresc RPC inclou `toggle_after` perquè el Shelly retorni a OFF si la Raspberry deixa de renovar l’ordre. Aquest lloguer de sortida no protegeix contra reinicis del mateix Shelly i no substitueix un tall tèrmic físic.
+- Tot i la confirmació de `switch:0`, el circuit real encara necessita comprovar un relé/contactor adequat, el tall físic independent, el comportament segur després de reiniciar i el watchdog autònom. L’auditoria remota anterior va trobar `initial_state=restore_last`; no s’ha modificat el Shelly ni s’ha enviat cap ordre de sortida durant aquest canvi.
 
 ## Fonts del fabricant
 

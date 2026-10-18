@@ -1,6 +1,6 @@
-# Panettone Lab v0.9.0
+# Panettone Lab v0.10.0
 
-v0.9.0 unifica la comparació i el timelapse, millora la detecció infraroja i afegeix estimacions persistents per calibratge. Resultats i límits de la validació real: [anàlisi visual](docs/visual-growth-v090.md).
+v0.10.0 unifica comparació i timelapse, amplia el control de la fermentadora, notificacions, recursos, exportació i arxivament. Decisions de seguretat, desplegament i primera prova supervisada: [guia v0.10.0](docs/v0.10.0.md).
 
 PWA local en català per observar la fermentació del lievito madre. El servei és autònom i no depèn de Cuinetes: parla directament amb la Tapo C210 i el Shelly Plus UNI a la xarxa local.
 
@@ -26,7 +26,7 @@ GitHub Actions --> GHCR (amd64 + arm64) --> Portainer Stack des d'aquest reposit
 - El service worker desa només l’esquelet estàtic. Dades, captures i sessió requereixen connexió i autenticació.
 - **Logotip i icones v0.6.0:** màster oficial a `app/static/icons/logo-original.png`; icones PWA, Apple, favicon i versió maskable a `app/static/icons/`. Els enllaços porten versió i el service worker substitueix la memòria cau antiga en activar-se.
 - **Control de fermentadora v0.8.1:** supervisió cada 5 s, modes Automàtic/Manual/Aturat, histèresi, horaris, alarmes i registre SQLite. La demanda continua en simulació per defecte.
-- **Sortida real preparada però desarmada.** La manta tèrmica és `switch:0` segons confirmació de l’usuari. El codi no envia ordres reals fins que quatre variables d’ambient s’habiliten; inclou renovació de `toggle_after` al Shelly per tornar a OFF si la Raspberry deixa de renovar la demanda. Cal validar físicament l’etapa de potència, el tall tèrmic independent i l’estat segur després de reiniciar el Shelly abans d’armar. Vegeu [l’auditoria de la fermentadora](docs/fermenter-audit.md).
+- **Sortida real implementada però desarmada.** La manta tèrmica és `switch:0` segons confirmació de l’usuari. No s’envien ordres reals fins que l’habilitació, el cablejat, el tall tèrmic independent, l’estat segur després de reiniciar i el watchdog local s’hagin verificat i configurat. Aquests cinc permisos de seguretat continuen a `false` per defecte. `toggle_after` es renova mentre el controlador demana escalfor, però falta provar en aquest Shelly que el temporitzador local talla realment davant una pèrdua de la Raspberry. Vegeu [l’auditoria](docs/fermenter-audit.md) i [la guia v0.10.0](docs/v0.10.0.md).
 
 ## Execució local
 
@@ -71,6 +71,7 @@ Amb `latest`, GitOps pot detectar un commit abans que GitHub Actions acabi de pu
 | `SHELLY_HEATER_WIRING_VERIFIED` | `false` | Atesta que s’ha revisat relé/contactor i cablejat |
 | `SHELLY_THERMAL_CUTOFF_VERIFIED` | `false` | Atesta tall tèrmic físic independent |
 | `SHELLY_RESTART_OFF_VERIFIED` | `false` | Atesta estat OFF segur després d’un reinici del Shelly |
+| `SHELLY_WATCHDOG_VERIFIED` | `false` | Atesta que s’ha comprovat el retorn local a OFF del Shelly |
 | `SHELLY_OUTPUT_WATCHDOG_SECONDS` | `15` | Retorn local a OFF si no es renova (10–60 s) |
 | `TEMPERATURE_KEY`, `HUMIDITY_KEY` | `temperature:100.tC`, `humidity:100.rh` | Ruta als valors del JSON Shelly |
 | `SENSOR_INTERVAL_SECONDS` | `30` | Període de lectura |
@@ -80,6 +81,7 @@ Amb `latest`, GitOps pot detectar un commit abans que GitHub Actions acabi de pu
 | `READONLY_API_TOKEN` | buit | Token Bearer independent de només lectura; buit desactiva `/api/v1` |
 | `SESSION_COOKIE_SECURE` | `false` | Activa-ho darrere d’HTTPS |
 | `CONTAINER_PLATFORM` | `linux/arm64` | Plataforma d’imatge; Pi 4 per defecte, usa `linux/amd64` en un host Intel/AMD |
+| `WEBPUSH_VAPID_PUBLIC_KEY`, `WEBPUSH_VAPID_PRIVATE_KEY`, `WEBPUSH_SUBJECT` | buit | Claus de Web Push opcionals; guarda la privada només a Portainer |
 
 ## Sessions, esdeveniments, exportació i API
 

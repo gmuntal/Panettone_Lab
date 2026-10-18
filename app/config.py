@@ -20,6 +20,7 @@ class Settings:
     shelly_wiring_verified: bool = os.getenv("SHELLY_HEATER_WIRING_VERIFIED", "false").lower() == "true"
     shelly_cutoff_verified: bool = os.getenv("SHELLY_THERMAL_CUTOFF_VERIFIED", "false").lower() == "true"
     shelly_restart_off_verified: bool = os.getenv("SHELLY_RESTART_OFF_VERIFIED", "false").lower() == "true"
+    shelly_watchdog_verified: bool = os.getenv("SHELLY_WATCHDOG_VERIFIED", "false").lower() == "true"
     shelly_watchdog_seconds: int = int(os.getenv("SHELLY_OUTPUT_WATCHDOG_SECONDS", "15"))
     temperature_key: str = os.getenv("TEMPERATURE_KEY", "temperature:100.tC")
     humidity_key: str = os.getenv("HUMIDITY_KEY", "humidity:100.rh")
@@ -28,6 +29,9 @@ class Settings:
     camera_password: str = os.getenv("CAMERA_PASSWORD", "")
     sensor_interval_seconds: int = int(os.getenv("SENSOR_INTERVAL_SECONDS", "30"))
     photo_interval_seconds: int = int(os.getenv("PHOTO_INTERVAL_SECONDS", "120"))
+    webpush_vapid_public_key: str = os.getenv("WEBPUSH_VAPID_PUBLIC_KEY", "")
+    webpush_vapid_private_key: str = os.getenv("WEBPUSH_VAPID_PRIVATE_KEY", "")
+    webpush_subject: str = os.getenv("WEBPUSH_SUBJECT", "")
 
 
 settings = Settings()
@@ -46,9 +50,14 @@ def validate_settings() -> None:
         raise RuntimeError("Only the user-confirmed Shelly output 0 is supported for the heater")
     if settings.shelly_watchdog_seconds < 10 or settings.shelly_watchdog_seconds > 60:
         raise RuntimeError("SHELLY_OUTPUT_WATCHDOG_SECONDS must be 10–60 seconds")
+    if bool(settings.webpush_vapid_public_key) != bool(settings.webpush_vapid_private_key):
+        raise RuntimeError("WEBPUSH_VAPID_PUBLIC_KEY i WEBPUSH_VAPID_PRIVATE_KEY s’han de configurar plegades")
+    if settings.webpush_vapid_public_key and not settings.webpush_subject.startswith(("mailto:", "https://")):
+        raise RuntimeError("WEBPUSH_SUBJECT ha de ser un correu de contacte mailto: o una URL HTTPS")
 
 
 def shelly_real_control_ready() -> bool:
     return (settings.shelly_real_control_enabled and settings.shelly_wiring_verified
             and settings.shelly_cutoff_verified and settings.shelly_restart_off_verified
+            and settings.shelly_watchdog_verified
             and settings.shelly_output_id == 0)

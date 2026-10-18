@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
+from datetime import datetime, timezone
 from . import database
 from .calibrated_growth import ALGORITHM_VERSION, prepare_reference, analyze
 
@@ -94,7 +95,7 @@ def sequence(fermentation_id,reference_id=None,enqueue=True):
     with database.connect() as db:
         fermentation=db.execute('SELECT * FROM fermentations WHERE id=?',(fermentation_id,)).fetchone()
         if not fermentation:raise ValueError('unknown_fermentation')
-        photos=[dict(r) for r in db.execute('SELECT id,captured_at,filename,camera_ok,fermentation_id FROM photos WHERE fermentation_id=? AND captured_at>=? ORDER BY captured_at,id',(fermentation_id,fermentation['started_at']))]
+        photos=[dict(r) for r in db.execute('SELECT id,captured_at,filename,camera_ok,fermentation_id,archived_at,archived_filename FROM photos WHERE fermentation_id=? AND captured_at>=? ORDER BY captured_at,id',(fermentation_id,fermentation['started_at']))]
     reference_id=reference_id or (calibration['photo_id'] if calibration else next((p['id'] for p in photos if p['camera_ok'] and p['filename']),None))
     ref=next((p for p in photos if p['id']==reference_id and p['camera_ok'] and p['filename']),None)
     if reference_id and ref is None:raise ValueError('reference_outside_fermentation')
@@ -111,7 +112,13 @@ def sequence(fermentation_id,reference_id=None,enqueue=True):
     pending=[];frames=[];stamps=context_stamps(photos,fullkey)
     for photo in photos:
         row=cached.get(photo['id']);image_stamp=stamps[photo['id']]
-        if compatible and photo['id']==ref['id'] and stamp(ref)!='missing':
+        if photo.get('archived_at') and row:
+            # Retain the previously calculated numeric result for historical
+            # graphs even when an intermediate original is in the recovery ZIP.
+            result={**json.loads(row['data']),'quality':'archived_analysis'}
+        elif photo.get('archived_at'):
+            result={'valid':False,'quality':'archived','reason':'original_photo_in_archive'}
+        elif compatible and photo['id']==ref['id'] and stamp(ref)!='missing':
             result={'valid':True,'quality':'manual_reference','percent':0.,'factor':1.,'surface_y_ratio':calibration['initial_surface_y'],'height_ratio':calibration['bottom_y']-calibration['initial_surface_y']}
         elif not photo['camera_ok'] or not photo['filename']:
             result={'valid':False,'quality':'unavailable','reason':'capture_failed'}
@@ -139,9 +146,21 @@ def _enqueue(fermentation_id,calibration,key,photos):
             reference=next(p for p in photos if p['id']==calibration['photo_id'])
             try:prepared=prepare_reference(photo_path(reference),calibration)
             except (OSError,ValueError):prepared=None
-            previous=calibration['initial_surface_y'];stamps=context_stamps(photos,key)
+            previous=calibration['initial_surface_y'];stamps=context_stamps(photos,key);seen_milestones=set()
             with database.connect() as db:
                 cached={r['photo_id']:dict(r) for r in db.execute('SELECT photo_id,data,image_stamp FROM visual_estimates WHERE signature=? AND algorithm_version=?',(key,ALGORITHM_VERSION))}
+            for prior in photos:
+                if prior['id']==calibration['photo_id']:
+                    continue
+                prior_row=cached.get(prior['id'])
+                if prior_row:
+                    try:
+                        prior_result=json.loads(prior_row['data'])
+                        if prior_result.get('valid'):
+                            for threshold in (100,200):
+                                if prior_result.get('percent',0)>=threshold:seen_milestones.add(threshold)
+                    except (TypeError,ValueError):
+                        pass
             for photo in photos:
                 if database.settings is not settings:return
                 image_stamp=stamps[photo['id']];old=cached.get(photo['id'])
@@ -161,6 +180,24 @@ def _enqueue(fermentation_id,calibration,key,photos):
                 with database.connect() as db:
                     db.execute('INSERT INTO visual_estimates VALUES(?,?,?,?,?,?) ON CONFLICT(photo_id,signature,algorithm_version) DO UPDATE SET image_stamp=excluded.image_stamp,data=excluded.data',
                         (photo['id'],fermentation_id,key,ALGORITHM_VERSION,image_stamp,json.dumps(result)))
+                    active=db.execute('SELECT ended_at FROM fermentations WHERE id=?',(fermentation_id,)).fetchone()
+                    monitoring=db.execute('SELECT active FROM monitoring_control WHERE id=1').fetchone()
+                if result.get('valid') and active and active['ended_at'] is None and monitoring and monitoring[0]:
+                    try:
+                        age=(datetime.now(timezone.utc)-datetime.fromisoformat(photo['captured_at'].replace('Z','+00:00'))).total_seconds()
+                    except (TypeError,ValueError):
+                        age=float('inf')
+                    if 0<=age<=max(300,database.settings.photo_interval_seconds*3):
+                        for threshold,label in ((100,'duplicada'),(200,'triplicada')):
+                            if threshold not in seen_milestones and result.get('percent',0)>=threshold:
+                                try:
+                                    from .push import enqueue
+                                    enqueue('fermentation',f'Massa {label}',
+                                            f'La detecció visual estima un creixement del {result["percent"]:.0f}% respecte de la referència.',
+                                            f'growth-milestone:{fermentation_id}:{threshold}')
+                                except Exception:
+                                    pass
+                            if result.get('percent',0)>=threshold:seen_milestones.add(threshold)
                 time.sleep(.025)
         except (sqlite3.Error,OSError):
             # A removed test DB or temporarily unavailable filesystem must not

@@ -2,6 +2,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from pathlib import Path
 
 
 class DatabaseMigrationTests(unittest.TestCase):
@@ -31,6 +32,11 @@ class DatabaseMigrationTests(unittest.TestCase):
                                               photo_dir=photo_path)
             database.settings = config.settings
             database.init_db()
+            backups = list((Path(directory) / "backups").glob("pre-v0.10.0-*.sqlite3"))
+            self.assertEqual(len(backups), 1)
+            with sqlite3.connect(backups[0]) as backup:
+                self.assertEqual(backup.execute("SELECT count(*) FROM readings").fetchone()[0], 1)
+                self.assertNotIn("archived_at", {row[1] for row in backup.execute("PRAGMA table_info(photos)")})
             calibration = {"left_x": .21, "right_x": .79, "bottom_y": .94,
                            "initial_surface_y": .71, "photo_id": 1,
                            "captured_at": "2026-10-16T20:00:00+00:00"}

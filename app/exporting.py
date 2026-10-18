@@ -96,7 +96,8 @@ def build_session_zip(database_path: str, photo_dir: str, start: str, end: str,
                       app_version: str = "unknown", timezone_name: str = "Europe/Madrid",
                       sensor_interval_seconds: int = 30,
                       photo_interval_seconds: int = 120,
-                      supplied_session_id: Optional[str] = None) -> Tuple[io.BytesIO, dict]:
+                      supplied_session_id: Optional[str] = None,
+                      temp_dir: Optional[str] = None) -> Tuple[io.BytesIO, dict]:
     """Create a ZIP from a SQLite backup and immutable photo files.
 
     `start` is inclusive and `end` is exclusive. The source DB is never modified.
@@ -144,7 +145,7 @@ def build_session_zip(database_path: str, photo_dir: str, start: str, end: str,
 
         # Keep the archive on temporary storage instead of holding every
         # original photo in Raspberry Pi memory.
-        archive_stream = tempfile.TemporaryFile(mode="w+b")
+        archive_stream = tempfile.TemporaryFile(mode="w+b", dir=temp_dir)
         photo_root = Path(photo_dir).resolve()
         photo_rows = []
         exported_paths = []

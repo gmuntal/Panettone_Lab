@@ -75,7 +75,7 @@ const fs=require('node:fs'),vm=require('node:vm');
 function controller(){
   const elements=new Map(),images=[],timers=[];
   function element(){return {value:'',textContent:'',style:{setProperty(){}},dataset:{},hidden:false,children:[],classList:{toggle(){}},addEventListener(name,fn){this[name]=fn;},append(...children){this.children.push(...children);},replaceChildren(){this.children=[];},removeAttribute(){},setAttribute(){},getBoundingClientRect(){return {width:600,height:260}},getContext(){return new Proxy({},{get(){return ()=>{}},set(){return true}})}};}
-  const doc={getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id)},querySelectorAll(){return []},createElement:element};
+  const doc={getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id)},querySelector(){return null},querySelectorAll(){return []},createElement:element};
   const context=vm.createContext({document:doc,window:{devicePixelRatio:1,addEventListener(){}},navigator:{},location:{hash:'#camera'},PanettoneCameraState:state,Intl,Date,console,Image:class {constructor(){images.push(this)}},setInterval(fn,delay){timers.push({fn,delay});return timers.length},clearInterval(){},setTimeout(){},clearTimeout(){}});
   const code=fs.readFileSync(require.resolve('../app/static/app.js'),'utf8').split('showPage(location.hash.slice(1),false);refresh();')[0];
   vm.runInContext(code,context);

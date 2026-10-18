@@ -119,7 +119,7 @@ def get_state(history_limit=120):
             "simulation_only": not shelly_real_control_ready(),
             "real_output_control_enabled": shelly_real_control_ready(),
             "physical_control_block_reason": None if shelly_real_control_ready() else
-              "Control real desarmat: cal habilitar-lo i verificar cablejat, tall tèrmic i estat segur al reinici",
+              "Control real desarmat: cal habilitar-lo i verificar cablejat, tall tèrmic, estat segur al reinici i watchdog local del Shelly",
             "actions": actions}
 
 
@@ -229,11 +229,13 @@ def poll_once(now=None):
         sensor_valid = False
         error = type(exc).__name__
         switches = (None, None)
+    push_alerts = []
     with connect() as db:
         config = dict(db.execute("SELECT * FROM fermenter_settings WHERE id=1").fetchone())
         runtime = dict(db.execute("SELECT * FROM fermenter_runtime WHERE id=1").fetchone())
         old_error = runtime.get("error")
         previous_observed_switch = runtime.get("switch0_on")
+        switch0_at_poll = switches[0]
         if sensor_valid:
             runtime.update(temperature_c=temperature, humidity_rh=humidity, sensor_ok=1,
                            error=None, observed_at=timestamp)
@@ -273,8 +275,54 @@ def poll_once(now=None):
         if lockout and runtime.get("lockout_reason") != lockout:
             runtime["lockout_reason"] = lockout
             _write_action(db, "alarm", config, runtime, reason)
+            push_alerts.append(("critical", "Protecció de la fermentadora", reason,
+                                f"fermenter-lockout:{lockout}"))
         elif not sensor_valid and old_error != error:
             _write_action(db, "alarm", config, runtime, reason)
+            push_alerts.append(("critical", "Lectura del Shelly invàlida", reason,
+                                f"fermenter-sensor:{error}:{timestamp[:13]}"))
+        if switch0_at_poll is True and not output and not bool(runtime.get("simulated_heater_on")):
+            details = "switch:0 era encesa sense demanda prèvia del controlador; s’ha revisat l’estat."
+            if previous_observed_switch is not True:
+                _write_action(db, "alarm", config, runtime, details)
+                push_alerts.append(("critical", "Manta activada inesperadament", details,
+                                    f"fermenter-unexpected-on:{timestamp[:13]}"))
+
+        # Trend warnings use only actual historical samples. If monitoring was
+        # paused or the series lacks coverage, no guess is produced.
+        if sensor_valid and runtime.get("observed_at"):
+            for minutes, kind in ((10, "off_rising"), (15, "on_no_rise")):
+                if kind == "off_rising" and (switch0_at_poll is not False or output):
+                    continue
+                if kind == "on_no_rise" and (switch0_at_poll is not True or not runtime.get("heater_on_since")):
+                    continue
+                if kind == "on_no_rise":
+                    try:
+                        if (now - _parse_time(runtime["heater_on_since"])).total_seconds() < minutes * 60:
+                            continue
+                    except ValueError:
+                        continue
+                cutoff = (now - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+                old_sample = db.execute("SELECT temperature_c FROM readings WHERE sensor_ok=1 AND temperature_c IS NOT NULL AND captured_at<=? ORDER BY captured_at DESC,id DESC LIMIT 1", (cutoff,)).fetchone()
+                if not old_sample:
+                    continue
+                delta = temperature - float(old_sample[0])
+                anomalous = (delta >= 1.0) if kind == "off_rising" else (delta < 0.2)
+                if not anomalous:
+                    continue
+                cooldown_key = f"temperature-{kind}"
+                recent = db.execute("SELECT 1 FROM fermenter_actions WHERE event_type=? AND occurred_at>=? LIMIT 1",
+                    (cooldown_key, (now - timedelta(minutes=30)).isoformat(timespec="seconds"))).fetchone()
+                if recent:
+                    continue
+                details = (f"Temperatura ambiental ha pujat {delta:.1f} °C en {minutes} min amb switch:0 apagat."
+                           if kind == "off_rising" else f"La temperatura ambiental gairebé no ha pujat ({delta:.1f} °C en {minutes} min) amb switch:0 encès; possible incidència, no és un diagnòstic.")
+                _write_action(db, cooldown_key, config, runtime, details)
+                push_alerts.append(("warning", "Tendència de temperatura inusual", details,
+                                    f"fermenter-{kind}:{timestamp[:13]}"))
+        if real_control and runtime.get("error") and runtime.get("error") != old_error and sensor_valid:
+            push_alerts.append(("critical", "Error del control tèrmic", runtime["error"],
+                                f"fermenter-control:{runtime['error']}:{timestamp[:13]}"))
         previous_output = bool(runtime.get("simulated_heater_on"))
         previous_reason = runtime.get("reason")
         if output != previous_output:
@@ -297,6 +345,12 @@ def poll_once(now=None):
                        runtime.get("last_switch_at"), runtime.get("lockout_reason")))
         if previous_reason != reason and reason.startswith(("Alarma", "Fora d’horari", "Sensor", "Bloqueig")):
             _write_action(db, "alarm" if reason.startswith(("Alarma", "Sensor", "Bloqueig")) else "schedule", config, runtime, reason)
+    for category, title, body, dedupe_key in push_alerts:
+        try:
+            from .push import enqueue
+            enqueue(category, title, body, dedupe_key)
+        except Exception:
+            log.exception("No s’ha pogut posar una alerta a la cua")
     return get_state(history_limit=10)
 
 

@@ -26,8 +26,11 @@ from .exporting import build_session_zip, get_observation_session, list_observat
 from .growth_detection import analyze_image, growth_from_surface
 from .scheduler import start_workers
 from .fermenter import get_state as get_fermenter_state, history as fermenter_history, update_settings as update_fermenter_settings
+from .resources import resource_snapshot
+from . import push
+from . import archiving
 
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.10.0"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -36,6 +39,7 @@ _api_rate_windows = {}
 def create_app(start_background=False):
     validate_settings()
     init_db()
+    archiving.recover_staging(settings.database_path, settings.photo_dir)
     app = Flask(__name__)
     app.secret_key = settings.app_secret_key
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
@@ -201,6 +205,55 @@ def create_app(start_background=False):
     def monitoring():
         return jsonify(monitoring_state())
 
+    @app.get("/api/resources")
+    @login_required
+    def resources():
+        return jsonify(resource_snapshot(settings.database_path, settings.photo_dir, settings.data_dir))
+
+    @app.get("/api/push")
+    @login_required
+    def push_state():
+        result = push.state()
+        result["public_key"] = settings.webpush_vapid_public_key or None
+        return jsonify(result)
+
+    @app.post("/api/push/subscriptions")
+    @login_required
+    def push_subscribe():
+        payload = request.get_json(silent=True)
+        try:
+            return jsonify(push.save_subscription(payload)), 201
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    @app.delete("/api/push/subscriptions")
+    @login_required
+    def push_unsubscribe():
+        payload = request.get_json(silent=True)
+        try:
+            return jsonify(push.remove_subscription(payload.get("endpoint") if isinstance(payload, dict) else None))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    @app.put("/api/push/preferences")
+    @login_required
+    def push_preferences():
+        try:
+            return jsonify(push.update_preferences(request.get_json(silent=True)))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    @app.post("/api/push/test")
+    @login_required
+    def push_test():
+        payload = request.get_json(silent=True) or {}
+        try:
+            return jsonify(push.send_test(payload.get("endpoint")))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 503
+
     @app.post("/api/monitoring")
     @login_required
     def set_monitoring():
@@ -342,10 +395,84 @@ def create_app(start_background=False):
     @login_required
     def web_fermentations():
         rows = read_rows("SELECT * FROM fermentations ORDER BY started_at DESC LIMIT 100", ())
+        storage = {item["id"]: item for item in archiving.session_storage(settings.database_path, settings.photo_dir)}
         for row in rows:
             row["events"] = read_rows(
                 "SELECT * FROM events WHERE fermentation_id=? ORDER BY occurred_at,id", (row["id"],))
+            row["storage"] = storage.get(row["id"])
         return jsonify({"items": rows, "active": next((row for row in rows if row["ended_at"] is None), None)})
+
+    @app.get("/api/fermentations/<int:fermentation_id>/archive-preview")
+    @login_required
+    def web_archive_preview(fermentation_id):
+        interval = request.args.get("sample_minutes", default=30, type=int)
+        try:
+            return jsonify(archiving.preview(settings.database_path, settings.photo_dir,
+                                             fermentation_id, interval))
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    @app.post("/api/fermentations/<int:fermentation_id>/photos/<int:photo_id>/important")
+    @login_required
+    def web_photo_important(fermentation_id, photo_id):
+        payload = request.get_json(silent=True)
+        try:
+            return jsonify(archiving.mark_important(settings.database_path, fermentation_id,
+                                                    photo_id, payload.get("important") if isinstance(payload, dict) else None))
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    @app.post("/api/fermentations/<int:fermentation_id>/archive")
+    @login_required
+    def web_archive_fermentation(fermentation_id):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "Falten les dades de confirmació"}), 400
+        try:
+            result = archiving.archive(settings.database_path, settings.photo_dir, settings.data_dir,
+                fermentation_id, payload.get("sample_minutes"), payload.get("keep_photo_ids"),
+                payload.get("confirmed_export_download"))
+            return jsonify(result), 201
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            log.exception("Arxivament de fermentació fallit")
+            return jsonify({"error": f"No s’ha completat l’arxivament: {type(exc).__name__}"}), 500
+
+    @app.get("/api/fermentations/<int:fermentation_id>/archive")
+    @login_required
+    def web_download_fermentation_archive(fermentation_id):
+        row = next(iter(read_rows("SELECT archive_filename FROM fermentations WHERE id=? AND archived_at IS NOT NULL", (fermentation_id,))), None)
+        if not row or not row["archive_filename"]:
+            return jsonify({"error": "No hi ha cap ZIP d’arxivament disponible"}), 404
+        archive_path = (Path(settings.data_dir) / "archives" / Path(row["archive_filename"]).name).resolve()
+        if archive_path.parent != (Path(settings.data_dir) / "archives").resolve() or not archive_path.is_file():
+            return jsonify({"error": "No s’ha trobat el ZIP d’arxivament"}), 404
+        return send_file(archive_path, mimetype="application/zip", as_attachment=True,
+                         download_name=archive_path.name, max_age=0)
+
+    @app.post("/api/fermentations/<int:fermentation_id>/archive/remove")
+    @login_required
+    def web_remove_fermentation_archive(fermentation_id):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or payload.get("confirmed_download") is not True:
+            return jsonify({"error": "Confirma que has descarregat i comprovat el ZIP abans d’eliminar-ne la còpia local"}), 400
+        with sqlite3.connect(settings.database_path, timeout=10) as db:
+            row = db.execute("SELECT archive_filename FROM fermentations WHERE id=? AND archived_at IS NOT NULL", (fermentation_id,)).fetchone()
+            if not row or not row[0]:
+                return jsonify({"error": "No hi ha cap ZIP local"}), 404
+            path = (Path(settings.data_dir) / "archives" / Path(row[0]).name).resolve()
+            if path.parent != (Path(settings.data_dir) / "archives").resolve() or not path.is_file():
+                return jsonify({"error": "No s’ha trobat el ZIP local"}), 404
+            path.unlink()
+            db.execute("UPDATE fermentations SET archive_filename=NULL WHERE id=?", (fermentation_id,))
+        return jsonify({"removed": True})
 
     @app.get("/api/fermentations/<int:fermentation_id>/export")
     @login_required
@@ -673,6 +800,8 @@ def create_app(start_background=False):
         calibration = {**guides, "photo_id": photo_id, "captured_at": photo["captured_at"],
                        "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         save_growth_calibration(calibration)
+        with sqlite3.connect(settings.database_path, timeout=10) as db:
+            db.execute("UPDATE photos SET important=1 WHERE id=?", (photo_id,))
         from .growth_analysis import save
         save(calibration,photo["fermentation_id"])
         # Re-seed the detector with a frame processed under the new ROI. This
