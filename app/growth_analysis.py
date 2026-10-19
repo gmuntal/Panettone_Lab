@@ -95,7 +95,7 @@ def sequence(fermentation_id,reference_id=None,enqueue=True):
     with database.connect() as db:
         fermentation=db.execute('SELECT * FROM fermentations WHERE id=?',(fermentation_id,)).fetchone()
         if not fermentation:raise ValueError('unknown_fermentation')
-        photos=[dict(r) for r in db.execute('SELECT id,captured_at,filename,camera_ok,fermentation_id,archived_at,archived_filename FROM photos WHERE fermentation_id=? AND captured_at>=? ORDER BY captured_at,id',(fermentation_id,fermentation['started_at']))]
+        photos=[dict(r) for r in db.execute('SELECT id,captured_at,filename,camera_ok,fermentation_id,archived_at,archived_filename FROM photos WHERE fermentation_id=? AND captured_at>=? AND (? IS NULL OR captured_at<=?) ORDER BY captured_at,id',(fermentation_id,fermentation['started_at'],fermentation['ended_at'],fermentation['ended_at']))]
     reference_id=reference_id or (calibration['photo_id'] if calibration else next((p['id'] for p in photos if p['camera_ok'] and p['filename']),None))
     ref=next((p for p in photos if p['id']==reference_id and p['camera_ok'] and p['filename']),None)
     if reference_id and ref is None:raise ValueError('reference_outside_fermentation')

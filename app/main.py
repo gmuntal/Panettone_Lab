@@ -20,17 +20,19 @@ from .database import (growth_config, growth_history, init_db, latest_analyzed_p
                        latest_state, recent_photos, recent_readings, save_growth_roi,
                        photos_in_range, save_growth_calibration, clear_growth_calibration,
                        set_growth_baseline, update_photo_analysis, active_fermentation_id,
-                       add_event, end_fermentation, start_fermentation)
+                       add_event, end_fermentation, start_fermentation, update_fermentation_period)
 from .devices import capture_photo
 from .exporting import build_session_zip, get_observation_session, list_observation_sessions
 from .growth_detection import analyze_image, growth_from_surface
 from .scheduler import start_workers
-from .fermenter import get_state as get_fermenter_state, history as fermenter_history, update_settings as update_fermenter_settings
+from .fermenter import (get_state as get_fermenter_state, history as fermenter_history,
+                        update_settings as update_fermenter_settings,
+                        start_timed_test as start_fermenter_test, stop_timed_test as stop_fermenter_test)
 from .resources import resource_snapshot
 from . import push
 from . import archiving
 
-APP_VERSION = "0.10.0"
+APP_VERSION = "0.11.0"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -285,6 +287,26 @@ def create_app(start_background=False):
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
 
+    @app.post("/api/fermenter/test")
+    @login_required
+    def start_fermenter_test_route():
+        payload = request.get_json(silent=True)
+        try:
+            if (not isinstance(payload, dict) or isinstance(payload.get("duration_seconds"), bool)
+                    or not isinstance(payload.get("duration_seconds"), int)):
+                raise ValueError("Indica una durada vàlida")
+            return jsonify(start_fermenter_test(payload["duration_seconds"])), 202
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    @app.post("/api/fermenter/test/stop")
+    @login_required
+    def stop_fermenter_test_route():
+        try:
+            return jsonify(stop_fermenter_test()), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
     @app.get("/api/readings")
     @login_required
     def readings():
@@ -513,12 +535,76 @@ def create_app(start_background=False):
             "initial_dough_temp_c": optional_number(payload, "initial_dough_temp_c", -20, 100),
             "target_fermenter_temp_c": optional_number(payload, "target_fermenter_temp_c", -20, 100),
             "notes": str(payload.get("notes", ""))[:2000] or None,
+            "camera_enabled": payload.get("camera_enabled", True),
         }
+        if not isinstance(fields["camera_enabled"], bool):
+            abort(400, description="camera_enabled ha de ser booleà")
         try:
             result = start_fermentation(fields)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 409
+        set_monitoring_active(True)
         return jsonify(result), 201
+
+    def parse_period_value(value, field):
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            abort(400, description=f"{field} ha de ser una data ISO vàlida")
+        if parsed.tzinfo is None:
+            abort(400, description=f"{field} ha d’incloure zona horària")
+        return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+    @app.get("/api/fermentations/<int:fermentation_id>/period-preview")
+    @login_required
+    def web_fermentation_period_preview(fermentation_id):
+        row = next(iter(read_rows("SELECT * FROM fermentations WHERE id=?", (fermentation_id,))), None)
+        if not row:
+            return jsonify({"error": "Fermentació no trobada"}), 404
+        if not row["ended_at"]:
+            return jsonify({"error": "No es pot ajustar una fermentació activa"}), 400
+        start = parse_period_value(request.args.get("start"), "start")
+        end = parse_period_value(request.args.get("end"), "end")
+        if start >= end:
+            return jsonify({"error": "El final ha de ser posterior a l’inici"}), 400
+        db = sqlite3.connect(f"file:{settings.database_path}?mode=ro", uri=True, timeout=15)
+        try:
+            photo_rows = db.execute("SELECT filename FROM photos WHERE fermentation_id=? AND (captured_at<? OR captured_at>?)", (fermentation_id, start, end)).fetchall()
+            reading_rows = db.execute("SELECT count(*) FROM readings WHERE fermentation_id=? AND (captured_at<? OR captured_at>?)", (fermentation_id, start, end)).fetchone()[0]
+            bytes_estimate = 0
+            photo_root = Path(settings.photo_dir).resolve()
+            for (filename,) in photo_rows:
+                if filename:
+                    path = (photo_root / Path(filename).name).resolve()
+                    if path.parent == photo_root and path.is_file():
+                        bytes_estimate += path.stat().st_size
+        finally:
+            db.close()
+        old_start = datetime.fromisoformat(row["started_at"].replace("Z", "+00:00"))
+        old_end = datetime.fromisoformat(row["ended_at"].replace("Z", "+00:00"))
+        new_start, new_end = datetime.fromisoformat(start), datetime.fromisoformat(end)
+        return jsonify({"fermentation_id": fermentation_id, "start": start, "end": end,
+                        "duration_original_seconds": int((old_end-old_start).total_seconds()),
+                        "duration_new_seconds": int((new_end-new_start).total_seconds()),
+                        "photos_affected": len(photo_rows), "readings_affected": reading_rows,
+                        "recoverable_bytes_estimate": bytes_estimate})
+
+    @app.post("/api/fermentations/<int:fermentation_id>/period")
+    @login_required
+    def web_adjust_fermentation_period(fermentation_id):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            abort(400)
+        start = parse_period_value(payload.get("start"), "start")
+        end = parse_period_value(payload.get("end"), "end")
+        if start >= end:
+            return jsonify({"error": "El final ha de ser posterior a l’inici"}), 400
+        try:
+            return jsonify(update_fermentation_period(fermentation_id, start, end))
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
     @app.post("/api/fermentations/<int:fermentation_id>/end")
     @login_required

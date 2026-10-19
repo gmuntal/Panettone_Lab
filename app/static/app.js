@@ -38,7 +38,7 @@ async function refreshFermentation(sequence=null) {
   fermentationsCache=data.items||[];
   activeFermentation=data.active;
   $('session-status').textContent=activeFermentation
-    ? `Fermentació #${activeFermentation.id} activa des de ${fmtTime(activeFermentation.started_at)}. Les lectures i fotografies noves s’hi associaran.`
+    ? `Fermentació #${activeFermentation.id} activa des de ${fmtTime(activeFermentation.started_at)}. Les lectures ambientals s’hi associen${activeFermentation.camera_enabled?' i el seguiment fotogràfic està actiu.':'; les fotografies estan pausades en aquesta sessió.'}`
     : 'No hi ha cap fermentació activa. Les lectures continuen funcionant independentment.';
   $('fermentation-form').hidden=Boolean(activeFermentation);
   $('end-fermentation').hidden=!activeFermentation;
@@ -96,7 +96,29 @@ function renderFermentations(){
     const details=document.createElement('details');const label=document.createElement('summary');label.textContent='Mesures i refrescos';const eventList=document.createElement('ol');(item.events||[]).forEach(event=>{const li=document.createElement('li');li.textContent=`${new Date(event.occurred_at).toLocaleString('ca-ES')} · ${eventLabels[event.event_type]||event.event_type}${event.ph!==null?` · pH ${Number(event.ph).toFixed(2)}`:''}${event.details?` · ${event.details}`:''}`;eventList.append(li);});details.append(label,eventList);card.append(head,summary,details);if(!item.archived_at){const exportLink=document.createElement('a');exportLink.className='secondary-button';exportLink.href=`/api/fermentations/${item.id}/export`;exportLink.textContent='Descarrega ZIP complet';card.append(exportLink);}
     const storage=item.storage;if(storage){const usage=document.createElement('p');usage.textContent=`${storage.status} · ${storage.available_photos} fotografies disponibles · ${formatBytes(storage.photo_bytes)} · ${elapsedSince(item.started_at)}`;card.append(usage);}
     if(item.archived_at){const archiveNote=document.createElement('p');archiveNote.textContent=`Arxivada · ${item.archive_saved_bytes?formatBytes(item.archive_saved_bytes)+' alliberats en fotos':''} · mostreig ${item.archive_sample_minutes||30} min`;card.append(archiveNote);if(item.archive_filename){const dl=document.createElement('a');dl.className='secondary-button';dl.href=`/api/fermentations/${item.id}/archive`;dl.textContent='Descarrega ZIP de recuperació';card.append(dl);const remove=document.createElement('button');remove.type='button';remove.className='secondary-button';remove.textContent='Elimina còpia ZIP de la Raspberry';remove.addEventListener('click',async()=>{if(!window.confirm('Elimina la còpia de recuperació de la Raspberry? Continua només si ja has descarregat i comprovat el ZIP al teu dispositiu.'))return;try{await json(`/api/fermentations/${item.id}/archive/remove`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed_download:true})});await refreshFermentation();}catch(error){window.alert(error.message);}});card.append(remove);}}
-    else card.append(createArchiveTools(item));list.append(card);});
+    if(!item.archived_at)card.append(createPeriodTools(item));
+    if(item.archived_at)list.append(card);else card.append(createArchiveTools(item));list.append(card);});
+}
+
+function localDateTimeInput(value){
+  const date=new Date(value),offset=date.getTimezoneOffset()*60000;
+  return new Date(date.getTime()-offset).toISOString().slice(0,16);
+}
+function createPeriodTools(item){
+  const details=document.createElement('details');details.className='period-tools';
+  const summary=document.createElement('summary');summary.textContent='Ajusta el període de la fermentació';details.append(summary);
+  const note=document.createElement('p');note.className='metric-foot';note.textContent='L’ajust conserva totes les lectures i fotografies. Només canvia el període que es mostra i s’exporta.';details.append(note);
+  const form=document.createElement('form');form.className='period-form';
+  const startLabel=document.createElement('label');startLabel.textContent='Inici';const start=document.createElement('input');start.type='datetime-local';start.required=true;start.value=localDateTimeInput(item.started_at);startLabel.append(start);
+  const endLabel=document.createElement('label');endLabel.textContent='Final';const end=document.createElement('input');end.type='datetime-local';end.required=true;end.value=localDateTimeInput(item.ended_at);endLabel.append(end);
+  const preview=document.createElement('button');preview.type='button';preview.className='secondary-button';preview.textContent='Previsualitza';
+  const save=document.createElement('button');save.type='submit';save.className='secondary-button';save.textContent='Desa període';
+  const status=document.createElement('p');status.className='metric-foot';status.setAttribute('role','status');
+  form.append(startLabel,endLabel,preview,save,status);details.append(form);
+  const values=()=>({start:new Date(start.value).toISOString(),end:new Date(end.value).toISOString()});
+  preview.addEventListener('click',async()=>{try{if(!start.value||!end.value)throw new Error('Indica les dues dates.');const period=values();const result=await json(`/api/fermentations/${item.id}/period-preview?start=${encodeURIComponent(period.start)}&end=${encodeURIComponent(period.end)}`);status.textContent=`Durada ${Math.round(result.duration_new_seconds/3600)} h · ${result.photos_affected} fotos i ${result.readings_affected} lectures quedarien fora del període; no s’esborren. Espai corresponent: ${formatBytes(result.recoverable_bytes_estimate)}.`;}catch(error){status.textContent=error.message;}});
+  form.addEventListener('submit',async event=>{event.preventDefault();save.disabled=true;try{if(!start.value||!end.value)throw new Error('Indica les dues dates.');await json(`/api/fermentations/${item.id}/period`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(values())});status.textContent='Període actualitzat. Les dades originals es conserven.';await refreshFermentation();}catch(error){status.textContent=error.message;}finally{save.disabled=false;}});
+  return details;
 }
 
 function createArchiveTools(item){
@@ -280,6 +302,15 @@ function renderMonitoring(state) {
   if(!state.active){camera.className='camera-status paused';camera.querySelector('span').textContent='Seguiment aturat';}
 }
 
+$('monitoring-button').addEventListener('click',async()=>{const button=$('monitoring-button');button.disabled=true;try{const result=await json('/api/monitoring',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:!button.classList.contains('stop')})});renderMonitoring(result);await refresh();}catch(error){window.alert(error.message);}finally{button.disabled=false;}});
+$('fermenter-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,feedback=$('fermenter-feedback'),payload=Object.fromEntries(new FormData(form));for(const input of form.querySelectorAll('input[type=checkbox]'))payload[input.name]=input.checked;payload.max_on_seconds=Number(payload.max_on_seconds)*60;try{feedback.textContent='Desant configuració…';await json('/api/fermenter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});feedback.textContent='Configuració desada.';await refreshFermenterOnly();}catch(error){feedback.textContent=`No s’ha pogut desar: ${error.message}`;}});
+document.querySelectorAll('.stepper [data-step]').forEach(button=>button.addEventListener('click',()=>{const input=button.parentElement.querySelector('input');input.value=(Number(input.value)+Number(button.dataset.step)).toFixed(1);input.dispatchEvent(new Event('change',{bubbles:true}));}));
+$('blanket-test-start').addEventListener('click',async()=>{const seconds=Number($('blanket-test-duration').value);if(!window.confirm(`Iniciar una prova física de ${seconds} segons? Confirma que ets al costat de la fermentadora i que les proteccions físiques s’han revisat.`))return;const button=$('blanket-test-start');button.disabled=true;$('blanket-test-status').textContent='Demanant prova temporitzada…';try{await json('/api/fermenter/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({duration_seconds:seconds})});await refreshFermenterOnly();}catch(error){$('blanket-test-status').textContent=error.message;}finally{button.disabled=false;}});
+$('blanket-test-stop').addEventListener('click',async()=>{if(!window.confirm('Demanar ara l’apagada de la manta?'))return;try{await json('/api/fermenter/test/stop',{method:'POST'});await refreshFermenterOnly();}catch(error){$('blanket-test-status').textContent=error.message;}});
+$('fermentation-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,feedback=$('session-status'),payload=Object.fromEntries(new FormData(form));payload.camera_enabled=form.elements.camera_enabled.checked;try{await json('/api/fermentations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});form.reset();await refresh();}catch(error){feedback.textContent=`No s’ha pogut iniciar: ${error.message}`;}});
+$('end-fermentation').addEventListener('click',async()=>{if(!activeFermentation||!window.confirm('Finalitzar aquesta fermentació?'))return;try{await json(`/api/fermentations/${activeFermentation.id}/end`,{method:'POST'});await refresh();}catch(error){window.alert(error.message);}});
+$('event-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,payload=Object.fromEntries(new FormData(form));try{await json('/api/events',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});form.reset();$('event-feedback').textContent='Anotació desada.';await refresh();}catch(error){$('event-feedback').textContent=`No s’ha pogut desar: ${error.message}`;}});
+
 let calibrationDrag=null;
 function renderCalibrationGuides(){const c=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72};const overlay=$('calibration-overlay');overlay.style.setProperty('--guide-left',`${c.left_x*100}%`);overlay.style.setProperty('--guide-right',`${c.right_x*100}%`);overlay.style.setProperty('--guide-top',`${c.initial_surface_y*100}%`);overlay.style.setProperty('--guide-bottom',`${c.bottom_y*100}%`);document.querySelectorAll('[data-guide]').forEach(line=>{const key=line.dataset.guide;line.style.left=key.endsWith('_x')?`${c[key]*100}%`:'';line.style.top=key.endsWith('_y')?`${c[key]*100}%`:'';});}
 function syncCameraFrame(image){if(!image.naturalWidth||!image.naturalHeight)return;image.closest('.camera-frame').style.aspectRatio=`${image.naturalWidth}/${image.naturalHeight}`;}
@@ -322,6 +353,11 @@ function renderFermenter(data,historyData=null) {
   $('fermenter-physical-outputs').textContent=`Shelly switch:0 (manta confirmada): ${outputs}`;
   const since=runtime.heater_on_since?Math.max(0,Math.floor((Date.now()-new Date(runtime.heater_on_since))/1000)):null;
   $('fermenter-timer').textContent=heaterOn&&since!==null?`Encès · ${Math.floor(since/60)} min ${since%60}s`:`${runtime.reason||'Aturat'}`;
+  const testActive=['starting','running'].includes(runtime.test_status)&&runtime.test_until;
+  const testRemaining=testActive?Math.max(0,Math.ceil((new Date(runtime.test_until)-Date.now())/1000)):0;
+  $('blanket-test-start').disabled=!real||!fresh||config.mode!=='stopped'||testActive||runtime.switch0_on!==false;
+  $('blanket-test-stop').hidden=!testActive;
+  $('blanket-test-status').textContent=testActive?`Prova en curs · apagada automàtica del Shelly en ${testRemaining} s.`:runtime.test_status==='completed'?'Darrera prova acabada i apagada confirmada.':runtime.test_status==='interrupted'?'Darrera prova interrompuda per un reinici; l’autoapagada local del Shelly havia de tallar-la.':!real?(data.physical_control_block_reason||'Prova bloquejada per seguretat.'):!fresh?'Prova bloquejada: lectura de temperatura no vàlida o antiga.':config.mode!=='stopped'?'Atura el control abans de provar.':runtime.switch0_on!==false?'Cal confirmar que switch:0 és OFF abans de provar.':'Prova física supervisada disponible.';
   $('fermenter-schedule').textContent=schedule.next_change?`${schedule.label} · canvi ${fmtTime(schedule.next_change)}`:schedule.label;
   $('fermenter-alert').hidden=!(runtime.error||runtime.lockout_reason||(!fresh&&runtime.observed_at));
   $('fermenter-alert').textContent=runtime.lockout_reason?`ALARMA BLOQUEJADA: ${runtime.lockout_reason}. Calefacció desactivada.`:runtime.error?`Alarma de comunicació: ${runtime.error}. Calefacció desactivada.`:!fresh&&runtime.observed_at?'La lectura del DHT22 és massa antiga. Calefacció desactivada.':'';
@@ -453,7 +489,7 @@ async function refresh() {
     if(reading&&reading.sensor_ok){$('temperature').innerHTML=`${Number(reading.temperature_c).toFixed(1)}<small>°C</small>`;$('humidity').innerHTML=`${Number(reading.humidity_rh).toFixed(1)}<small>%</small>`;$('temperature-time').textContent=`Darrera lectura · ${fmtTime(reading.captured_at)}`;$('humidity-time').textContent='Relativa de l’ambient';}
     else if(reading){$('temperature-time').textContent='No s’ha pogut llegir el Shelly';$('humidity-time').textContent=`Darrera prova · ${fmtTime(reading.captured_at)}`;}
     const photo=state.photo,camera=$('camera-status');
-    if(photo){$('photo-time').textContent=`Darrera captura · ${fmtTime(photo.captured_at)}`;camera.className=monitoring.active?`camera-status ${photo.camera_ok?'ok':'bad'}`:'camera-status paused';camera.querySelector('span').textContent=monitoring.active?(photo.camera_ok?'Connectada':'Sense connexió'):'Seguiment aturat';}
+    if(photo){$('photo-time').textContent=`Darrera captura · ${fmtTime(photo.captured_at)}`;const cameraPaused=activeFermentation&& !activeFermentation.camera_enabled;camera.className=monitoring.active&&!cameraPaused?`camera-status ${photo.camera_ok?'ok':'bad'}`:'camera-status paused';camera.querySelector('span').textContent=cameraPaused?'Pausada en aquesta fermentació':monitoring.active?(photo.camera_ok?'Connectada':'Sense connexió'):'Seguiment aturat';}
     const latestImage=$('home-camera-image');
     if(photo?.camera_ok&&photo.filename){latestImage.src=`/photos/${encodeURIComponent(photo.filename)}`;latestImage.hidden=false;$('home-camera-time').textContent=`Captura ${new Date(photo.captured_at).toLocaleString('ca-ES')}`;}
     else{latestImage.removeAttribute('src');latestImage.hidden=true;$('home-camera-time').textContent=photo?`Darrera prova de càmera ${fmtTime(photo.captured_at)} · sense imatge vàlida`:'Encara no hi ha cap fotografia disponible.';}
@@ -518,4 +554,4 @@ let timer;
 window.addEventListener('resize',()=>{clearTimeout(timer);timer=setTimeout(refresh,200)});
 showPage(location.hash.slice(1),false);refresh();setInterval(refresh,30000);
 setInterval(refreshFermenterOnly,5000);
-if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.10.0',{updateViaCache:'none'}).catch(()=>{});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.11.0',{updateViaCache:'none'}).catch(()=>{});

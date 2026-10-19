@@ -1,6 +1,6 @@
-# Panettone Lab v0.10.0
+# Panettone Lab v0.11.0
 
-v0.10.0 unifica comparació i timelapse, amplia el control de la fermentadora, notificacions, recursos, exportació i arxivament. Decisions de seguretat, desplegament i primera prova supervisada: [guia v0.10.0](docs/v0.10.0.md).
+v0.11.0 afegeix l'ajust auditat del període de fermentacions finalitzades, la pausa de càmera per sessió i una prova física temporitzada de manta protegida. També incorpora comparació/timelapse, monitoratge de recursos, notificacions, exportació i arxivament intel·ligent. Decisions de seguretat i límits: [guia v0.11.0](docs/v0.11.0.md).
 
 PWA local en català per observar la fermentació del lievito madre. El servei és autònom i no depèn de Cuinetes: parla directament amb la Tapo C210 i el Shelly Plus UNI a la xarxa local.
 
@@ -26,7 +26,7 @@ GitHub Actions --> GHCR (amd64 + arm64) --> Portainer Stack des d'aquest reposit
 - El service worker desa només l’esquelet estàtic. Dades, captures i sessió requereixen connexió i autenticació.
 - **Logotip i icones v0.6.0:** màster oficial a `app/static/icons/logo-original.png`; icones PWA, Apple, favicon i versió maskable a `app/static/icons/`. Els enllaços porten versió i el service worker substitueix la memòria cau antiga en activar-se.
 - **Control de fermentadora v0.8.1:** supervisió cada 5 s, modes Automàtic/Manual/Aturat, histèresi, horaris, alarmes i registre SQLite. La demanda continua en simulació per defecte.
-- **Sortida real implementada però desarmada.** La manta tèrmica és `switch:0` segons confirmació de l’usuari. No s’envien ordres reals fins que l’habilitació, el cablejat, el tall tèrmic independent, l’estat segur després de reiniciar i el watchdog local s’hagin verificat i configurat. Aquests cinc permisos de seguretat continuen a `false` per defecte. `toggle_after` es renova mentre el controlador demana escalfor, però falta provar en aquest Shelly que el temporitzador local talla realment davant una pèrdua de la Raspberry. Vegeu [l’auditoria](docs/fermenter-audit.md) i [la guia v0.10.0](docs/v0.10.0.md).
+- **Sortida real implementada però desarmada.** La manta tèrmica és `switch:0` segons confirmació de l’usuari. No s’envien ordres reals fins que l’habilitació, el cablejat, el tall tèrmic independent, l’estat segur després de reiniciar i el watchdog local s’hagin verificat i configurat. Aquests cinc permisos de seguretat continuen a `false` per defecte. `toggle_after` es renova mentre el controlador demana escalfor, però falta provar en aquest Shelly que el temporitzador local talla realment davant una pèrdua de la Raspberry. Vegeu [l’auditoria](docs/fermenter-audit.md) i [la guia v0.11.0](docs/v0.11.0.md).
 
 ## Execució local
 

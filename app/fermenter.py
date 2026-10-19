@@ -123,6 +123,87 @@ def get_state(history_limit=120):
             "actions": actions}
 
 
+def start_timed_test(duration_seconds):
+    """Start an explicitly requested, bounded physical test; never used by startup."""
+    if duration_seconds not in (10, 30, 60):
+        raise ValueError("La prova només pot durar 10, 30 o 60 segons")
+    if not shelly_real_control_ready():
+        raise ValueError("Prova física bloquejada: les proteccions del Shelly encara no estan verificades i habilitades")
+    now = datetime.now(timezone.utc)
+    started = now.isoformat(timespec="seconds")
+    until = (now + timedelta(seconds=duration_seconds)).isoformat(timespec="seconds")
+    # Reserve in the database before touching the device: concurrent browsers
+    # cannot start a second test or switch to automatic control in the gap.
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        config = dict(db.execute("SELECT * FROM fermenter_settings WHERE id=1").fetchone())
+        runtime = dict(db.execute("SELECT * FROM fermenter_runtime WHERE id=1").fetchone())
+        if config["mode"] != "stopped":
+            raise ValueError("Atura primer el control automàtic o manual")
+        if runtime.get("test_status") in ("starting", "running"):
+            raise ValueError("Ja hi ha una prova de manta en curs")
+        try:
+            fresh_sensor = bool(runtime.get("observed_at") and
+                                (now - _parse_time(runtime["observed_at"])).total_seconds() <= MAX_SENSOR_AGE_SECONDS)
+        except (ValueError, TypeError):
+            fresh_sensor = False
+        if not runtime.get("sensor_ok") or not fresh_sensor or runtime.get("temperature_c") is None:
+            raise ValueError("No es pot iniciar: falta una lectura ambiental vàlida")
+        if float(runtime["temperature_c"]) >= float(config["overtemp_c"]):
+            raise ValueError("No es pot iniciar: la temperatura ja supera el límit d’alarma")
+        if runtime.get("switch0_on") is not False:
+            raise ValueError("No es pot iniciar: l’estat de switch:0 no confirma que la manta estigui apagada")
+        db.execute("UPDATE fermenter_runtime SET test_started_at=?,test_until=?,test_duration_seconds=?,test_status='starting',reason='Prova temporitzada en preparació' WHERE id=1",
+                   (started, until, duration_seconds))
+        _write_action(db, "blanket_test_starting", config, runtime, f"Reserva de prova física de {duration_seconds} s")
+    try:
+        from .devices import set_shelly_heater_output, read_shelly_heater_output
+        set_shelly_heater_output(True, duration_seconds)
+        observed = read_shelly_heater_output()
+        if observed is not True:
+            raise RuntimeError("El Shelly no confirma la sortida encesa")
+        with connect() as db:
+            config = dict(db.execute("SELECT * FROM fermenter_settings WHERE id=1").fetchone())
+            runtime = dict(db.execute("SELECT * FROM fermenter_runtime WHERE id=1").fetchone())
+            db.execute("UPDATE fermenter_runtime SET test_status='running',switch0_on=1,reason='Prova temporitzada de manta en curs',last_switch_at=?,heater_on_since=? WHERE id=1", (started, started))
+            _write_action(db, "blanket_test_started", config, runtime, f"Shelly switch:0 confirmat ON; autoapagada local en {duration_seconds} s")
+    except Exception as exc:
+        try:
+            from .devices import set_shelly_heater_output, read_shelly_heater_output
+            set_shelly_heater_output(False, duration_seconds)
+            off_confirmed = read_shelly_heater_output() is False
+        except Exception:
+            off_confirmed = False
+        with connect() as db:
+            config = dict(db.execute("SELECT * FROM fermenter_settings WHERE id=1").fetchone())
+            runtime = dict(db.execute("SELECT * FROM fermenter_runtime WHERE id=1").fetchone())
+            db.execute("UPDATE fermenter_runtime SET test_status='failed',test_until=NULL,switch0_on=?,error=?,reason='Prova fallida; s’ha demanat OFF' WHERE id=1",
+                       (0 if off_confirmed else None, type(exc).__name__))
+            _write_action(db, "blanket_test_failed", config, runtime,
+                          f"{type(exc).__name__}; OFF confirmat={off_confirmed}")
+        raise ValueError(f"Prova fallida ({type(exc).__name__}); s’ha demanat apagar la manta") from exc
+    return get_state()
+
+
+def stop_timed_test(reason="Prova aturada manualment"):
+    if not shelly_real_control_ready():
+        raise ValueError("No es pot enviar una ordre física: control Shelly bloquejat per seguretat")
+    from .devices import set_shelly_heater_output, read_shelly_heater_output
+    set_shelly_heater_output(False, settings.shelly_watchdog_seconds)
+    off = read_shelly_heater_output() is False
+    with connect() as db:
+        config = dict(db.execute("SELECT * FROM fermenter_settings WHERE id=1").fetchone())
+        runtime = dict(db.execute("SELECT * FROM fermenter_runtime WHERE id=1").fetchone())
+        status = "stopped" if off else "failed"
+        db.execute("UPDATE fermenter_runtime SET test_status=?,test_until=NULL,switch0_on=?,heater_on_since=NULL,reason=? WHERE id=1",
+                   (status, 0 if off else None, reason if off else "OFF no confirmat"))
+        _write_action(db, "blanket_test_stopped" if off else "blanket_test_failed", config, runtime,
+                      reason if off else "El Shelly no confirma OFF")
+    if not off:
+        raise ValueError("El Shelly no confirma OFF. Comprova el dispositiu immediatament.")
+    return get_state()
+
+
 def _write_action(db, event_type, config, runtime, details):
     db.execute("""INSERT INTO fermenter_actions(occurred_at,fermentation_id,event_type,mode,
                temperature_c,target_c,simulated_heater_on,details) VALUES(?,?,?,?,?,?,?,?)""",
@@ -136,9 +217,9 @@ def safe_start():
     with connect() as db:
         config = dict(db.execute("SELECT * FROM fermenter_settings WHERE id=1").fetchone())
         runtime = dict(db.execute("SELECT * FROM fermenter_runtime WHERE id=1").fetchone())
-        changed = config["mode"] != "stopped" or bool(runtime["simulated_heater_on"])
+        changed = config["mode"] != "stopped" or bool(runtime["simulated_heater_on"]) or runtime.get("test_status") in ("starting", "running")
         db.execute("UPDATE fermenter_settings SET mode='stopped',manual_on=0,updated_at=? WHERE id=1", (utc_now(),))
-        db.execute("UPDATE fermenter_runtime SET simulated_heater_on=0,heater_on_since=NULL,reason='Reinici segur: controlador aturat' WHERE id=1")
+        db.execute("UPDATE fermenter_runtime SET simulated_heater_on=0,heater_on_since=NULL,test_status=CASE WHEN test_status IN ('starting','running') THEN 'interrupted' ELSE test_status END,test_until=NULL,reason='Reinici segur: controlador aturat' WHERE id=1")
         config["mode"] = "stopped"
         runtime["simulated_heater_on"] = 0
         if changed:
@@ -162,6 +243,8 @@ def update_settings(payload):
     with connect() as db:
         config = dict(db.execute("SELECT * FROM fermenter_settings WHERE id=1").fetchone())
         runtime = dict(db.execute("SELECT * FROM fermenter_runtime WHERE id=1").fetchone())
+        if runtime.get("test_status") in ("starting", "running") and payload.get("mode", "stopped") != "stopped":
+            raise ValueError("La prova temporitzada té el control exclusiu de la manta")
         new = dict(config)
         if "mode" in payload:
             if payload["mode"] not in ("automatic", "manual", "stopped"):
@@ -248,13 +331,44 @@ def poll_once(now=None):
                 age_ok = (now - _parse_time(runtime["observed_at"])).total_seconds() <= MAX_SENSOR_AGE_SECONDS
             except ValueError:
                 pass
-        output, reason, lockout = decide_simulated_output(
-            config, runtime, runtime.get("temperature_c"), sensor_valid and age_ok, now)
         real_control = shelly_real_control_ready()
+        test_status = runtime.get("test_status")
+        test_until = runtime.get("test_until")
+        test_active = test_status in ("starting", "running") and test_until
+        if test_active:
+            try:
+                expired = now >= _parse_time(test_until)
+            except ValueError:
+                expired = True
+            if expired:
+                try:
+                    from .devices import set_shelly_heater_output, read_shelly_heater_output
+                    set_shelly_heater_output(False, settings.shelly_watchdog_seconds)
+                    off_confirmed = read_shelly_heater_output() is False
+                except Exception:
+                    off_confirmed = False
+                output, reason, lockout = False, "Prova acabada · OFF confirmat" if off_confirmed else "Error: OFF de prova no confirmat", None
+                runtime["test_status"] = "completed" if off_confirmed else "failed"
+                runtime["test_until"] = None
+                switches = (False if off_confirmed else None, switches[1])
+                _write_action(db, "blanket_test_completed" if off_confirmed else "blanket_test_failed",
+                              config, runtime, reason)
+            else:
+                output, reason, lockout = bool(switches[0]), "Prova temporitzada en curs", None
+                if switches[0] is not True:
+                    runtime["test_status"] = "failed"
+                    runtime["test_until"] = None
+                    output, reason, lockout = False, "La manta s’ha apagat abans d’acabar la prova", None
+                    _write_action(db, "blanket_test_failed", config, runtime, reason)
+        else:
+            output, reason, lockout = decide_simulated_output(
+                config, runtime, runtime.get("temperature_c"), sensor_valid and age_ok, now)
         if real_control:
             try:
                 from .devices import set_shelly_heater_output
-                if output or switches[0] is not False:
+                if test_active:
+                    pass  # The device-side toggle_after owns the test timeout.
+                elif output or switches[0] is not False:
                     set_shelly_heater_output(output, settings.shelly_watchdog_seconds)
                 from .devices import read_shelly_heater_output
                 switches = (read_shelly_heater_output(), switches[1])
@@ -338,11 +452,12 @@ def poll_once(now=None):
         runtime["reason"] = reason
         db.execute("""UPDATE fermenter_runtime SET observed_at=?,temperature_c=?,humidity_rh=?,sensor_ok=?,error=?,
                    switch0_on=?,switch1_on=?,simulated_heater_on=?,reason=?,heater_on_since=?,last_switch_at=?,
-                   lockout_reason=? WHERE id=1""", (
+                   lockout_reason=?,test_started_at=?,test_until=?,test_duration_seconds=?,test_status=? WHERE id=1""", (
                        runtime.get("observed_at"), runtime.get("temperature_c"), runtime.get("humidity_rh"),
                        int(bool(runtime.get("sensor_ok"))), runtime.get("error"), switches[0], switches[1],
                        int(bool(runtime.get("simulated_heater_on"))), reason, runtime.get("heater_on_since"),
-                       runtime.get("last_switch_at"), runtime.get("lockout_reason")))
+                       runtime.get("last_switch_at"), runtime.get("lockout_reason"),runtime.get("test_started_at"),
+                       runtime.get("test_until"),runtime.get("test_duration_seconds"),runtime.get("test_status")))
         if previous_reason != reason and reason.startswith(("Alarma", "Fora d’horari", "Sensor", "Bloqueig")):
             _write_action(db, "alarm" if reason.startswith(("Alarma", "Sensor", "Bloqueig")) else "schedule", config, runtime, reason)
     for category, title, body, dedupe_key in push_alerts:

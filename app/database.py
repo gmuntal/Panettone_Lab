@@ -17,6 +17,7 @@ def init_db() -> None:
     os.makedirs(settings.data_dir, exist_ok=True)
     os.makedirs(settings.photo_dir, exist_ok=True)
     _backup_before_v010_migration()
+    _backup_before_v011_migration()
     with connect() as db:
         db.executescript("""
         PRAGMA journal_mode=WAL;
@@ -68,7 +69,8 @@ def init_db() -> None:
             archived_at TEXT,
             archive_filename TEXT,
             archive_sample_minutes INTEGER,
-            archive_saved_bytes INTEGER
+            archive_saved_bytes INTEGER,
+            camera_enabled INTEGER NOT NULL DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS idx_fermentations_started ON fermentations(started_at);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_fermentations_one_active
@@ -118,7 +120,11 @@ def init_db() -> None:
             reason TEXT NOT NULL DEFAULT 'stopped',
             heater_on_since TEXT,
             last_switch_at TEXT,
-            lockout_reason TEXT
+            lockout_reason TEXT,
+            test_started_at TEXT,
+            test_until TEXT,
+            test_duration_seconds INTEGER,
+            test_status TEXT
         );
         CREATE TABLE IF NOT EXISTS fermenter_actions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,6 +139,19 @@ def init_db() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_fermenter_actions_time ON fermenter_actions(occurred_at,id);
         CREATE INDEX IF NOT EXISTS idx_fermenter_actions_fermentation ON fermenter_actions(fermentation_id,occurred_at);
+        CREATE TABLE IF NOT EXISTS fermentation_period_edits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fermentation_id INTEGER NOT NULL REFERENCES fermentations(id),
+            edited_at TEXT NOT NULL,
+            previous_started_at TEXT NOT NULL,
+            previous_ended_at TEXT,
+            new_started_at TEXT NOT NULL,
+            new_ended_at TEXT NOT NULL,
+            operation TEXT NOT NULL DEFAULT 'adjust',
+            photos_removed INTEGER NOT NULL DEFAULT 0,
+            recovery_zip TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_period_edits_fermentation ON fermentation_period_edits(fermentation_id,edited_at);
         CREATE TABLE IF NOT EXISTS push_subscriptions (
             endpoint TEXT PRIMARY KEY,
             p256dh TEXT NOT NULL,
@@ -175,9 +194,15 @@ def init_db() -> None:
                 db.execute(f"ALTER TABLE photos ADD COLUMN {name} {declaration}")
         fermentation_columns = {row[1] for row in db.execute("PRAGMA table_info(fermentations)")}
         for name, declaration in (("archived_at", "TEXT"), ("archive_filename", "TEXT"),
-                                  ("archive_sample_minutes", "INTEGER"), ("archive_saved_bytes", "INTEGER")):
+                                  ("archive_sample_minutes", "INTEGER"), ("archive_saved_bytes", "INTEGER"),
+                                  ("camera_enabled", "INTEGER NOT NULL DEFAULT 1")):
             if name not in fermentation_columns:
                 db.execute(f"ALTER TABLE fermentations ADD COLUMN {name} {declaration}")
+        runtime_columns = {row[1] for row in db.execute("PRAGMA table_info(fermenter_runtime)")}
+        for name, declaration in (("test_started_at", "TEXT"), ("test_until", "TEXT"),
+                                  ("test_duration_seconds", "INTEGER"), ("test_status", "TEXT")):
+            if name not in runtime_columns:
+                db.execute(f"ALTER TABLE fermenter_runtime ADD COLUMN {name} {declaration}")
         db.execute("INSERT OR IGNORE INTO monitoring_control(id,active,changed_at) VALUES(1,0,?)",
                    (utc_now(),))
         db.execute("INSERT OR IGNORE INTO fermenter_settings(id,updated_at) VALUES(1,?)", (utc_now(),))
@@ -219,10 +244,52 @@ def _backup_before_v010_migration():
         source.close()
 
 
+def _backup_before_v011_migration():
+    """Snapshot SQLite before adding the camera flag, test state, and edit audit."""
+    path = settings.database_path
+    if not os.path.isfile(path) or os.path.getsize(path) == 0:
+        return
+    source = sqlite3.connect(path, timeout=15)
+    try:
+        tables = {row[0] for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not tables:
+            return
+        fermentation_columns = ({row[1] for row in source.execute("PRAGMA table_info(fermentations)")}
+                                if "fermentations" in tables else set())
+        runtime_columns = ({row[1] for row in source.execute("PRAGMA table_info(fermenter_runtime)")}
+                           if "fermenter_runtime" in tables else set())
+        if ("camera_enabled" in fermentation_columns and
+            {"test_started_at", "test_until", "test_duration_seconds", "test_status"}.issubset(runtime_columns) and
+            "fermentation_period_edits" in tables):
+            return
+        backup_dir = os.path.join(settings.data_dir, "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        destination_path = os.path.join(backup_dir, f"pre-v0.11.0-{time.time_ns()}.sqlite3")
+        destination = sqlite3.connect(destination_path)
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+        os.chmod(destination_path, 0o600)
+    except Exception as exc:
+        raise RuntimeError("No es pot fer una còpia coherent de SQLite abans de la migració v0.11.0") from exc
+    finally:
+        source.close()
+
+
 def monitoring_state():
     with connect() as db:
         row = db.execute("SELECT active,changed_at FROM monitoring_control WHERE id=1").fetchone()
     return {"active": bool(row["active"]), "changed_at": row["changed_at"]}
+
+
+def photo_capture_enabled():
+    """Keep camera capture independent: a session may explicitly disable photos."""
+    with connect() as db:
+        row = db.execute("SELECT camera_enabled FROM fermentations WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1").fetchone()
+    if row:
+        return bool(row[0])
+    return monitoring_state()["active"]
 
 
 def set_monitoring_active(active):
@@ -276,11 +343,12 @@ def start_fermentation(fields):
         started_at = utc_now()
         cursor = db.execute("""INSERT INTO fermentations(
             started_at,starter_mass_g,flour_g,water_g,flour_type,hydration_pct,
-            initial_ph,initial_dough_temp_c,target_fermenter_temp_c,notes
-        ) VALUES(?,?,?,?,?,?,?,?,?,?)""", (
+            initial_ph,initial_dough_temp_c,target_fermenter_temp_c,notes,camera_enabled
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""", (
             started_at, fields.get("starter_mass_g"), fields.get("flour_g"), fields.get("water_g"),
             fields.get("flour_type"), fields.get("hydration_pct"), fields.get("initial_ph"),
-            fields.get("initial_dough_temp_c"), fields.get("target_fermenter_temp_c"), fields.get("notes")))
+            fields.get("initial_dough_temp_c"), fields.get("target_fermenter_temp_c"), fields.get("notes"),
+            int(bool(fields.get("camera_enabled", True)))))
         db.execute("INSERT INTO events(fermentation_id,occurred_at,event_type,details) VALUES(?,?,?,?)",
                    (cursor.lastrowid, started_at, "fermentation_start", "Inici de fermentació"))
         result = dict(db.execute("SELECT * FROM fermentations WHERE id=?", (cursor.lastrowid,)).fetchone())
@@ -290,6 +358,27 @@ def start_fermentation(fields):
     except Exception:
         pass
     return result
+
+
+def update_fermentation_period(fermentation_id, started_at, ended_at):
+    """Adjust a completed fermentation's effective window, retaining an audit trail."""
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM fermentations WHERE id=?", (fermentation_id,)).fetchone()
+        if not row:
+            raise LookupError("Fermentació no trobada")
+        if not row["ended_at"]:
+            raise ValueError("No es pot retallar una fermentació activa")
+        old_start, old_end = row["started_at"], row["ended_at"]
+        db.execute("INSERT INTO fermentation_period_edits(fermentation_id,edited_at,previous_started_at,previous_ended_at,new_started_at,new_ended_at) VALUES(?,?,?,?,?,?)",
+                   (fermentation_id, utc_now(), old_start, old_end, started_at, ended_at))
+        db.execute("UPDATE fermentations SET started_at=?,ended_at=? WHERE id=?",
+                   (started_at, ended_at, fermentation_id))
+        db.execute("UPDATE events SET occurred_at=? WHERE fermentation_id=? AND event_type='fermentation_start' AND occurred_at=?",
+                   (started_at, fermentation_id, old_start))
+        db.execute("UPDATE events SET occurred_at=? WHERE fermentation_id=? AND event_type='fermentation_end' AND occurred_at=?",
+                   (ended_at, fermentation_id, old_end))
+        return dict(db.execute("SELECT * FROM fermentations WHERE id=?", (fermentation_id,)).fetchone())
 
 
 def end_fermentation(fermentation_id):

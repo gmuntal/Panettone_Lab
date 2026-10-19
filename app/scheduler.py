@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 
 from .config import settings
-from .database import add_photo, add_reading, growth_config, latest_analyzed_photo, monitoring_state
+from .database import add_photo, add_reading, growth_config, latest_analyzed_photo, monitoring_state, photo_capture_enabled
 from .devices import capture_photo, read_shelly
 from .growth_detection import DETECTOR_VERSION, analyze_image, reproject_surface_ratio
 
@@ -38,14 +38,14 @@ def sensor_loop(stop):
 
 def photo_loop(stop):
     while not stop.is_set():
-        if not monitoring_state()["active"]:
+        if not photo_capture_enabled():
             stop.wait(1)
             continue
         filename = datetime.now().strftime("%Y%m%d-%H%M%S.jpg")
         destination = os.path.join(settings.photo_dir, filename)
         try:
             capture_photo(destination)
-            if not monitoring_state()["active"]:
+            if not photo_capture_enabled():
                 os.remove(destination)
                 continue
             try:
@@ -67,13 +67,13 @@ def photo_loop(stop):
             except Exception:
                 log.exception("Anàlisi visual de creixement fallida")
                 analysis = None
-            if monitoring_state()["active"]:
+            if photo_capture_enabled():
                 add_photo(filename, analysis=analysis)
             else:
                 os.remove(destination)
         except Exception as exc:
             log.warning("Captura de càmera fallida: %s", exc)
-            if monitoring_state()["active"]:
+            if photo_capture_enabled():
                 add_photo("", type(exc).__name__)
         wait_for_next_cycle(stop, settings.photo_interval_seconds)
 
