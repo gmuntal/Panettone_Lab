@@ -7,7 +7,7 @@ from statistics import median
 from PIL import Image
 from .growth_detection import growth_from_surface
 
-ALGORITHM_VERSION = 'calibrated-stripes-1'
+ALGORITHM_VERSION = 'calibrated-stripes-2'
 
 
 def profiles(path, calibration):
@@ -65,13 +65,22 @@ def _detect(frame, calibration, previous=None):
         if options:
             _,y,contrast,occupancy=max(options)
             candidates.append((y,contrast,occupancy))
-    if len(candidates)<4:return {'valid':False,'quality':'unavailable','reason':'insufficient_spatial_support','support':len(candidates)/7}
+    if len(candidates)<4:
+        return {'valid':False,'quality':'unavailable','reason':'insufficient_spatial_support',
+                'support':round(len(candidates)/7,3),'evidence':'edge_not_continuous_across_interior_bands'}
     center=median(c[0] for c in candidates)
     spread=median(abs(c[0]-center) for c in candidates)
     agreeing=[c for c in candidates if abs(c[0]-center)<=max(4,initial*.16)]
     if len(agreeing)<4 or spread>max(5,initial*.18):
-        return {'valid':False,'quality':'uncertain','reason':'ambiguous_surface','support':len(agreeing)/7}
-    return {'valid':True,'quality':'correct','reason':None,'surface_y_ratio':round(median(c[0] for c in agreeing)/height,6),
+        return {'valid':False,'quality':'uncertain','reason':'ambiguous_surface',
+                'support':round(len(agreeing)/7,3),'surface_spread_pixels':round(spread,2),
+                'evidence':'candidate_edges_disagree_between_interior_bands'}
+    surface=median(c[0] for c in agreeing)/height
+    # The prior is used to rank plausible candidates, never to reject a real
+    # fall. A rate limit needs the timestamp delta and should be applied by the
+    # sequence layer; _detect alone cannot distinguish a 2-minute jump from a
+    # multi-hour fermentation change.
+    return {'valid':True,'quality':'correct','reason':None,'surface_y_ratio':round(surface,6),
             'support':round(len(agreeing)/7,3),'edge_contrast':round(median(c[1] for c in agreeing),2),'surface_spread_pixels':round(spread,2)}
 
 

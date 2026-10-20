@@ -50,6 +50,13 @@ class CalibratedGrowthTests(unittest.TestCase):
             result=analyze(path,CAL,previous=.45)
             self.assertTrue(result['valid']);self.assertGreater(result['surface_y_ratio'],.65)
 
+    def test_temporal_prior_does_not_reject_a_realistic_large_growth_without_elapsed_time(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'growth.png';synthetic(.60).save(path)
+            result=analyze(path,CAL,previous=.75)
+            self.assertTrue(result['valid'],result)
+            self.assertLess(result['surface_y_ratio'],.65)
+
     def test_changed_geometry_is_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'image.png';synthetic(.75).save(path);reference=prepare_reference(path,CAL)

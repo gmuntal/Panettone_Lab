@@ -9,6 +9,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from . import database
 from .calibrated_growth import ALGORITHM_VERSION, prepare_reference, analyze
+from .growth_detection import growth_from_surface
 
 _lock=threading.Lock()
 _jobs=set()
@@ -16,30 +17,51 @@ _jobs=set()
 
 def initialize():
     with database.connect() as db:
-        if db.execute("SELECT 1 FROM sqlite_master WHERE name='visual_calibrations'").fetchone():return
+        has_calibrations=db.execute("SELECT 1 FROM sqlite_master WHERE name='visual_calibrations'").fetchone()
+        has_manual=db.execute("SELECT 1 FROM sqlite_master WHERE name='visual_manual_measurements'").fetchone()
+        if has_calibrations and has_manual:return
         # Persistent online backup on the same volume. No original rows are rewritten.
         folder=Path(database.settings.data_dir)/'backups';folder.mkdir(exist_ok=True)
         destination=folder/('pre-visual-growth-'+str(time.time_ns())+'.sqlite3')
         with sqlite3.connect(destination) as backup:db.backup(backup)
         destination.chmod(0o600)
-        db.executescript('''
-        BEGIN IMMEDIATE;
-        CREATE TABLE visual_calibrations(id INTEGER PRIMARY KEY AUTOINCREMENT,
-          fermentation_id INTEGER REFERENCES fermentations(id),photo_id INTEGER NOT NULL REFERENCES photos(id),
-          data TEXT NOT NULL,signature TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1);
-        CREATE UNIQUE INDEX visual_active_calibration ON visual_calibrations(COALESCE(fermentation_id,0)) WHERE active=1;
-        CREATE TABLE visual_estimates(photo_id INTEGER NOT NULL REFERENCES photos(id),
-          fermentation_id INTEGER REFERENCES fermentations(id),signature TEXT NOT NULL,
-          algorithm_version TEXT NOT NULL,image_stamp TEXT NOT NULL,data TEXT NOT NULL,
-          PRIMARY KEY(photo_id,signature,algorithm_version));
-        CREATE INDEX visual_estimates_sequence ON visual_estimates(fermentation_id,signature,algorithm_version);
-        ''')
-        old=db.execute("SELECT value FROM growth_settings WHERE key='calibration'").fetchone()
-        if old:
-            try:
-                calibration=json.loads(old[0]);photo=db.execute('SELECT fermentation_id FROM photos WHERE id=?',(calibration['photo_id'],)).fetchone()
-                if photo: _save(db,calibration,photo['fermentation_id'])
-            except (ValueError,KeyError,TypeError):pass
+        if not has_calibrations:
+            db.executescript('''
+            BEGIN IMMEDIATE;
+            CREATE TABLE visual_calibrations(id INTEGER PRIMARY KEY AUTOINCREMENT,
+              fermentation_id INTEGER REFERENCES fermentations(id),photo_id INTEGER NOT NULL REFERENCES photos(id),
+              data TEXT NOT NULL,signature TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1);
+            CREATE UNIQUE INDEX visual_active_calibration ON visual_calibrations(COALESCE(fermentation_id,0)) WHERE active=1;
+            CREATE TABLE visual_estimates(photo_id INTEGER NOT NULL REFERENCES photos(id),
+              fermentation_id INTEGER REFERENCES fermentations(id),signature TEXT NOT NULL,
+              algorithm_version TEXT NOT NULL,image_stamp TEXT NOT NULL,data TEXT NOT NULL,
+              PRIMARY KEY(photo_id,signature,algorithm_version));
+            CREATE INDEX visual_estimates_sequence ON visual_estimates(fermentation_id,signature,algorithm_version);
+            ''')
+            old=db.execute("SELECT value FROM growth_settings WHERE key='calibration'").fetchone()
+            if old:
+                try:
+                    calibration=json.loads(old[0]);photo=db.execute('SELECT fermentation_id FROM photos WHERE id=?',(calibration['photo_id'],)).fetchone()
+                    if photo: _save(db,calibration,photo['fermentation_id'])
+                except (ValueError,KeyError,TypeError):pass
+        if not has_manual:
+            db.executescript('''
+            BEGIN IMMEDIATE;
+            CREATE TABLE visual_manual_measurements(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              fermentation_id INTEGER NOT NULL REFERENCES fermentations(id),
+              photo_id INTEGER NOT NULL REFERENCES photos(id),
+              captured_at TEXT NOT NULL,
+              surface_y_ratio REAL NOT NULL CHECK(surface_y_ratio>0 AND surface_y_ratio<1),
+              calibration_signature TEXT NOT NULL,
+              calibration_data TEXT NOT NULL,
+              algorithm_version TEXT NOT NULL,
+              source TEXT NOT NULL DEFAULT 'authenticated_user',
+              created_at TEXT NOT NULL,
+              active INTEGER NOT NULL DEFAULT 1);
+            CREATE INDEX visual_manual_photo ON visual_manual_measurements(fermentation_id,photo_id,active,created_at);
+            CREATE UNIQUE INDEX visual_manual_active ON visual_manual_measurements(photo_id) WHERE active=1;
+            ''')
 
 
 def signature(calibration):
@@ -67,6 +89,36 @@ def calibration_for(fermentation_id):
         row=db.execute('SELECT data FROM visual_calibrations WHERE fermentation_id IS ? AND active=1',(fermentation_id,)).fetchone()
         vessel=db.execute("SELECT value FROM growth_settings WHERE key='vessel_calibration'").fetchone()
     return (json.loads(row[0]) if row else None,json.loads(vessel[0]) if vessel else None)
+
+
+def set_manual_measurement(fermentation_id,photo_id,surface_y_ratio):
+    calibration,_=calibration_for(fermentation_id)
+    if not calibration:
+        raise ValueError('Calibra el recipient abans de corregir una superfície.')
+    try:surface=float(surface_y_ratio)
+    except (TypeError,ValueError):raise ValueError('La posició de la superfície no és vàlida.')
+    if not 0<surface<calibration['bottom_y']:
+        raise ValueError('La superfície ha de quedar dins del recipient i per sobre del fons calibrat.')
+    calculated=growth_from_surface(calibration['bottom_y'],calibration['initial_surface_y'],surface)
+    if not calculated:raise ValueError('No es pot calcular l’alçada amb aquest calibratge.')
+    with database.connect() as db:
+        photo=db.execute('SELECT id,fermentation_id,captured_at,camera_ok,filename FROM photos WHERE id=? AND fermentation_id=?',(photo_id,fermentation_id)).fetchone()
+        if not photo or not photo['camera_ok'] or not photo['filename']:
+            raise LookupError('La fotografia no existeix o no té una imatge disponible.')
+        db.execute('UPDATE visual_manual_measurements SET active=0 WHERE photo_id=? AND active=1',(photo_id,))
+        cursor=db.execute('''INSERT INTO visual_manual_measurements
+          (fermentation_id,photo_id,captured_at,surface_y_ratio,calibration_signature,calibration_data,algorithm_version,source,created_at,active)
+          VALUES(?,?,?,?,?,?,?,?,?,1)''',
+          (fermentation_id,photo_id,photo['captured_at'],surface,signature(calibration),json.dumps(calibration,sort_keys=True),
+           ALGORITHM_VERSION,'authenticated_user',database.utc_now()))
+        row=db.execute('SELECT * FROM visual_manual_measurements WHERE id=?',(cursor.lastrowid,)).fetchone()
+    return dict(row)
+
+
+def remove_manual_measurement(fermentation_id,photo_id):
+    with database.connect() as db:
+        cursor=db.execute('UPDATE visual_manual_measurements SET active=0 WHERE fermentation_id=? AND photo_id=? AND active=1',(fermentation_id,photo_id))
+        return cursor.rowcount>0
 
 
 def photo_path(photo):
@@ -110,6 +162,11 @@ def sequence(fermentation_id,reference_id=None,enqueue=True):
         with database.connect() as db:
             cached={r['photo_id']:dict(r) for r in db.execute('SELECT * FROM visual_estimates WHERE fermentation_id=? AND signature=? AND algorithm_version=?',(fermentation_id,fullkey,ALGORITHM_VERSION))}
     pending=[];frames=[];stamps=context_stamps(photos,fullkey)
+    manual_by_photo={}
+    if compatible:
+        with database.connect() as db:
+            for manual in db.execute('SELECT * FROM visual_manual_measurements WHERE fermentation_id=? AND active=1 AND calibration_signature=?',(fermentation_id,key)):
+                manual_by_photo[manual['photo_id']]=dict(manual)
     for photo in photos:
         row=cached.get(photo['id']);image_stamp=stamps[photo['id']]
         if photo.get('archived_at') and row:
@@ -126,7 +183,17 @@ def sequence(fermentation_id,reference_id=None,enqueue=True):
         else:
             result={'valid':False,'quality':'pending' if compatible else 'uncalibrated','reason':'pending' if compatible else 'calibration_required'}
             if compatible:pending.append(photo)
-        frames.append({**photo,'measurement':result,'image_revision':hashlib.sha256(stamp(photo).encode()).hexdigest()[:16]})
+        manual_row=manual_by_photo.get(photo['id'])
+        manual_result=None
+        if manual_row and calibration and photo['camera_ok'] and photo['filename']:
+            calculated=growth_from_surface(calibration['bottom_y'],calibration['initial_surface_y'],manual_row['surface_y_ratio'])
+            if calculated:
+                manual_result={**calculated,'valid':True,'quality':'manual','surface_y_ratio':manual_row['surface_y_ratio'],
+                    'height_ratio':round(calibration['bottom_y']-manual_row['surface_y_ratio'],6),
+                    'created_at':manual_row['created_at'],'source':manual_row['source'],'id':manual_row['id'],
+                    'algorithm_version':manual_row['algorithm_version']}
+        frames.append({**photo,'measurement':result,'manual_measurement':manual_result,
+                       'image_revision':hashlib.sha256(stamp(photo).encode()).hexdigest()[:16]})
     if pending and enqueue:_enqueue(fermentation_id,calibration,fullkey,photos)
     return {'fermentation_id':fermentation_id,'calibration':calibration,'vessel':vessel,'reference_id':reference_id,
             'calibration_signature':fullkey,'algorithm_version':ALGORITHM_VERSION,'frames':frames,'available_photos':available,

@@ -32,7 +32,7 @@ from .resources import resource_snapshot
 from . import push
 from . import archiving
 
-APP_VERSION = "0.11.1"
+APP_VERSION = "0.11.2"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -810,6 +810,30 @@ def create_app(start_background=False):
         if fermentation_id is None or ('reference_id' in request.args and reference_id is None):return jsonify(error='Cal seleccionar una fermentació i una referència vàlides.'),400
         try:return jsonify(sequence(fermentation_id,reference_id,enqueue=app.config.get("VISUAL_ANALYSIS_BACKGROUND",True)))
         except ValueError as error:return jsonify(error=str(error)),404
+
+    @app.put("/api/growth/manual/<int:photo_id>")
+    @login_required
+    def set_manual_growth_surface(photo_id):
+        payload=request.get_json(silent=True)
+        if not isinstance(payload,dict):return jsonify(error='Falten les dades de la mesura.'),400
+        fermentation_id=payload.get('fermentation_id')
+        surface=payload.get('surface_y_ratio')
+        if isinstance(fermentation_id,bool) or not isinstance(fermentation_id,int) or fermentation_id<1:
+            return jsonify(error='Selecciona una fermentació vàlida.'),400
+        try:
+            from .growth_analysis import set_manual_measurement
+            row=set_manual_measurement(fermentation_id,photo_id,surface)
+            return jsonify({'manual_measurement':row}),200
+        except LookupError as error:return jsonify(error=str(error)),404
+        except ValueError as error:return jsonify(error=str(error)),400
+
+    @app.delete("/api/growth/manual/<int:photo_id>")
+    @login_required
+    def delete_manual_growth_surface(photo_id):
+        fermentation_id=request.args.get('fermentation_id',type=int)
+        if not fermentation_id or fermentation_id<1:return jsonify(error='Selecciona una fermentació vàlida.'),400
+        from .growth_analysis import remove_manual_measurement
+        return jsonify({'removed':remove_manual_measurement(fermentation_id,photo_id)})
 
     @app.get("/api/growth")
     @login_required

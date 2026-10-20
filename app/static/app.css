@@ -113,3 +113,40 @@
 .timed-test{margin:18px 0;padding:14px;border:1px solid var(--line);border-radius:12px;background:#fbfcfa}.timed-test h3{margin:0 0 6px;font-size:13px}.timed-test>label{display:inline-grid;gap:5px;margin:6px 10px 6px 0;font-size:11px;color:var(--muted)}.timed-test select,.period-form input{padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font:inherit}.period-tools{margin-top:12px;padding:12px 0;border-top:1px solid var(--line)}.period-tools summary{color:var(--green);font-size:11px;font-weight:700;cursor:pointer}.period-form{display:flex;flex-wrap:wrap;align-items:end;gap:9px;margin-top:10px}.period-form label{display:grid;gap:5px;font-size:10px;color:var(--muted)}.period-form label input{font-size:11px}.period-form [role=status]{flex-basis:100%;margin:0}
 
 .camera-frame img[hidden]{display:none}#camera-load-status{min-height:1.4em;margin:8px 0}
+
+/* v0.11.2: the camera overlays are clipped to their own photo coordinate space. */
+html{min-height:100%}body{min-height:100vh;min-height:100dvh}
+.camera-frame{position:relative;isolation:isolate;contain:paint;overflow:hidden;overflow:clip}
+.calibration-overlay{position:absolute;inset:0;z-index:1;overflow:hidden;clip-path:inset(0);}
+.camera-frame .growth-overlay{z-index:3}.camera-frame .current-surface-line{z-index:2}.camera-frame .manual-surface-line{z-index:4}
+.calibration-settings{border-top:1px solid var(--line);margin-top:12px;padding-top:11px}
+.calibration-settings>summary{font-size:11px;font-weight:700;color:var(--green);cursor:pointer;list-style-position:inside}
+.calibration-settings>.muted{font-size:10px;line-height:1.4;margin:7px 0}
+.calibration-settings:not([open]) #calibration-overlay{visibility:hidden}
+.manual-actions{display:flex;align-items:center;gap:8px;min-height:36px}.manual-provenance{font-size:10px;color:var(--muted)}
+.manual-editor{display:grid;gap:8px;padding:10px;border:1px solid #dce9df;border-radius:10px;background:#f7faf7}
+.manual-editor[hidden]{display:none}.manual-editor>p{margin:0;font-size:10px;line-height:1.45;color:var(--muted)}
+.manual-editor output{font-size:11px;font-weight:700;color:var(--green)}.manual-editor-actions{display:flex;gap:7px;flex-wrap:wrap}
+.manual-surface-line{position:absolute;left:0;right:0;top:50%;height:28px;transform:translateY(-50%);padding:0;border:0;border-top:3px solid #f3c84a;background:transparent;touch-action:none;cursor:ns-resize;z-index:4}
+.manual-surface-line:after{content:"Arrossega la superfície";position:absolute;right:6px;top:4px;padding:4px 7px;border-radius:5px;background:#173630dd;color:#fff;font:600 10px system-ui;white-space:nowrap}
+.manual-surface-line[hidden]{display:none}
+.timeline-markers{display:flex;gap:6px;overflow-x:auto;padding:3px 0 8px;scrollbar-width:thin;overscroll-behavior-inline:contain}
+.timeline-markers[hidden]{display:none}.timeline-marker{flex:none;max-width:min(76vw,260px);padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:#f7faf7;color:var(--green);font:600 10px inherit;text-align:left;white-space:normal}
+.timeline-marker.doubled,.timeline-marker.tripled{border-color:#e5d3ae;background:#fffaf0}.timeline-marker.drop,.timeline-marker.gap{border-color:#ecd8d3;background:#fff8f6;color:#9b4e43}
+.timeline-control>span{font-size:10px;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
+@media(max-width:760px){
+  .topbar{position:sticky;top:0;z-index:20;height:calc(58px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 12px 0;}
+  .brand{min-width:0;gap:8px;font-size:14px;white-space:nowrap}.brand-copy{min-width:0;overflow:hidden;text-overflow:ellipsis}.brand-mark.logo{width:36px;height:36px;flex:none}
+  .brand small.version{font-size:8px;margin-top:2px}.logout{padding:7px 9px;font-size:11px;flex:none}
+  .app-shell{padding:12px 10px calc(78px + env(safe-area-inset-bottom));}
+  .app-nav{position:fixed;z-index:30;top:auto;bottom:0;left:0;right:0;transform:none;min-height:64px;padding:5px 4px calc(5px + env(safe-area-inset-bottom));}
+  .nav-item{min-height:48px;font-size:9px}.camera-display-grid{grid-template-columns:1fr}.camera-frame{max-height:58vh}
+  .camera-viewer-panel .panel-heading{align-items:flex-start;flex-wrap:wrap}.camera-viewer-panel .panel-heading>.secondary-button{max-width:100%;white-space:normal}
+  .calibration-adjust{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.calibration-adjust label{grid-column:1/-1}.calibration-adjust .secondary-button{white-space:normal}
+  .manual-actions{align-items:flex-start;flex-direction:column}.manual-editor-actions .secondary-button{flex:1 1 auto;min-height:40px}
+}
+@media(max-width:380px){
+  .topbar{padding-inline:8px}.brand{gap:6px;font-size:12px}.brand-mark.logo{width:32px;height:32px}.logout{padding:6px 7px;font-size:10px}
+  .app-shell{padding-inline:8px}.panel{padding:14px 10px}.nav-item{font-size:8px}.nav-item>span:first-child{font-size:15px}
+  .camera-viewer-panel .panel-heading h2{font-size:15px}.manual-editor-actions{display:grid;grid-template-columns:1fr 1fr}.manual-editor-actions #manual-correction-delete{grid-column:1/-1}
+}

@@ -29,6 +29,7 @@ let calibrationTouched=false,displayCalibrationSignature=null;
 const cameraSelections=new Map();
 let cameraSelectionGeneration=0;
 let vesselCalibration=null,finalPinned=false,playbackEndId=null,currentImageReady=false,currentImageSequence=0;
+let manualSurfaceDraft=null,manualSurfaceDragging=false;
 
 function formPayload(form) {
   return Object.fromEntries([...new FormData(form)].filter(([,value])=>value!==''));
@@ -270,9 +271,26 @@ function drawGrowthChart(rows) {
 }
 function growthFor(photo){
   if(!photo||!growthCalibration||calibrationDirty||!displayCalibrationSignature||photo.analysisSignature!==displayCalibrationSignature)return null;
+  const manual=photo.manual_measurement;
+  if(manual?.valid&&Number.isFinite(manual.percent)&&Number.isFinite(manual.factor))return {...manual,surface:manual.surface_y_ratio,source:'manual'};
   const result=photo.measurement;
   if(!result?.valid||!Number.isFinite(result.percent)||!Number.isFinite(result.factor))return null;
-  return {...result,surface:result.surface_y_ratio};
+  return {...result,surface:result.surface_y_ratio,source:'automatic'};
+}
+function detectionExplanation(measurement){
+  const reasons={
+    insufficient_vertical_resolution:'La imatge no ofereix prou detall vertical del recipient.',
+    insufficient_spatial_support:'La vora candidata no continua per prou zones interiors; podria ser un reflex.',
+    ambiguous_surface:'Les vores candidates no coincideixen prou entre les zones analitzades.',
+    sudden_change:'El canvi respecte de la fotografia anterior és massa gran; s’omet per evitar un salt no fiable.',
+    image_geometry_changed:'La mida de la imatge ha canviat respecte de la referència.',
+    reference_image_unavailable:'No s’ha pogut llegir la fotografia de referència.',
+    image_unavailable:'No s’ha pogut llegir aquesta fotografia.',
+    capture_failed:'La captura ha fallat o no té una imatge vàlida.',
+    pending:'L’anàlisi d’aquesta fotografia encara està pendent.',
+    calibration_required:'Calibratge necessari per calcular l’alçada.'
+  };
+  return reasons[measurement?.reason]||'No s’ha pogut determinar la superfície amb prou fiabilitat.';
 }
 function renderGrowth(){
   const photo=photoLibrary.find(p=>String(p.id)===String(selectedFinalId));
@@ -285,13 +303,68 @@ function renderGrowth(){
   $('growth-overlay-percent').textContent=percent;$('growth-overlay-factor').textContent=factor;
   $('growth-overlay-milestone').textContent=threshold==='tripled'?'Massa triplicada':threshold==='doubled'?'Massa duplicada':'';
   $('growth-level').textContent=calibrationDirty?'Calibratge pendent de desar':result?(threshold==='tripled'?'Massa triplicada':threshold==='doubled'?'Massa duplicada':'Creixement visual'):pending?'Analitzant la seqüència…':'Sense detecció fiable';
-  $('growth-detail').textContent=result?`${fmtTime(photo.captured_at)} · ${photo.archived_at?'Anàlisi guardada abans de l’arxivament; original al ZIP':result.quality==='manual_reference'?'Referència manual':'Detecció correcta'} · estimació d’alçada`:calibrationDirty?'Desa els ajustos per recalcular.':photo?.measurement?.reason==='pending'?'Estimació pendent per a aquesta fotografia.':'No es pot detectar la superfície actual amb prou evidència.';
+  $('growth-detail').textContent=result?`${fmtTime(photo.captured_at)} · ${photo.archived_at?'Anàlisi guardada abans de l’arxivament; original al ZIP':result.quality==='manual_reference'?'Referència manual':result.source==='manual'?'Mesura manual':'Detecció automàtica'} · estimació d’alçada`:calibrationDirty?'Desa els ajustos per recalcular.':detectionExplanation(photo?.measurement);
   $('growth-change').textContent=growthCalibration?.captured_at?`Referència · ${fmtTime(growthCalibration.captured_at)}`:'Cal calibrar';
-  $('comparison-growth').textContent=calibrationDirty?'Calibratge pendent de desar':result?`Creixement estimat ${percent} · ${factor}`:pending?'Calculant aquesta fotografia…':'— · No detectable';
-  $('current-surface-line').hidden=!result;
+  $('comparison-growth').textContent=calibrationDirty?'Calibratge pendent de desar':result?`${result.source==='manual'?'Mesura manual':'Detecció automàtica'} · ${percent} · ${factor}`:pending?'Calculant aquesta fotografia…':'— · No detectable';
+  $('current-surface-line').hidden=!result||Boolean(manualSurfaceDraft);
   if(result)$('current-surface-line').style.top=`${result.surface*100}%`;
+  $('manual-correction-toggle').disabled=!photo||!currentImageReady||!growthCalibration||calibrationDirty;
+  $('manual-correction-toggle').textContent=photo?.manual_measurement?.valid?'Modificar correcció manual':'Corregir superfície';
+  $('manual-correction-toggle').setAttribute('aria-pressed',String(Boolean(manualSurfaceDraft)));
+  $('manual-provenance').textContent=photo?.manual_measurement?.valid?`Mesura manual · ${fmtTime(photo.manual_measurement.created_at)}`:'';
+  $('manual-correction-delete').hidden=!photo?.manual_measurement?.valid;
+  $('manual-surface-line').hidden=!manualSurfaceDraft||!currentImageReady;
+  if(manualSurfaceDraft)$('manual-surface-line').style.top=`${manualSurfaceDraft*100}%`;
+  updateManualPreview();
   $('baseline-button').disabled=!photo;
+  const selectedMeasurement=photo?.manual_measurement?.valid?photo.manual_measurement:photo?.measurement?.valid?photo.measurement:null;
+  const measurementPrefix=photo?.manual_measurement?.valid?'manual · ':'';
+  $('timeline-selection-label').textContent=photo?`${fmtTime(photo.captured_at)} · ${selectedMeasurement?`${measurementPrefix}${selectedMeasurement.percent>=0?'+':''}${selectedMeasurement.percent.toFixed(0)}%`:'—'}`:'—';
   renderCalibrationGuides();
+}
+function renderTimelineMarkers(){
+  const host=$('timeline-markers');if(!host)return;host.replaceChildren();
+  const markers=PanettoneCameraState.markers(growthHistoryCache||[]).filter(item=>photoLibrary.some(photo=>String(photo.id)===String(item.photo_id)));
+  host.hidden=!markers.length;
+  for(const marker of markers){const button=document.createElement('button');button.type='button';button.className=`timeline-marker ${marker.kind}`;button.dataset.photoId=String(marker.photo_id);button.title=marker.label;button.textContent=`${marker.label} · ${fmtTime(marker.captured_at)}`;button.addEventListener('click',()=>selectPhoto(marker.photo_id));host.append(button);}
+}
+function updateManualPreview(){
+  const calibration=growthCalibration,y=manualSurfaceDraft;
+  if(!calibration||!Number.isFinite(y)){$('manual-growth-preview').textContent='Alçada estimada: —';return;}
+  const initial=Number(calibration.bottom_y)-Number(calibration.initial_surface_y),current=Number(calibration.bottom_y)-y;
+  if(initial<=0||current<=0){$('manual-growth-preview').textContent='Aquesta línia queda fora de la zona calibrada.';return;}
+  const factor=current/initial,percent=(factor-1)*100;
+  $('manual-growth-preview').textContent=`Alçada relativa ${Math.round(factor*100)}% · creixement ${percent>=0?'+':''}${percent.toFixed(0)}%`;
+  $('manual-surface-line').setAttribute('aria-valuenow',String(Math.round((1-y)*100)));
+}
+function beginManualCorrection(){
+  const photo=photoLibrary.find(p=>String(p.id)===String(selectedFinalId));
+  if(!photo||!currentImageReady||!growthCalibration||calibrationDirty)return;
+  manualSurfaceDraft=photo.manual_measurement?.valid?photo.manual_measurement.surface_y_ratio:
+    photo.measurement?.valid?photo.measurement.surface_y_ratio:growthCalibration.initial_surface_y;
+  $('manual-editor').hidden=false;renderGrowth();$('manual-surface-line').focus({preventScroll:true});
+}
+function moveManualSurface(event){
+  const frame=$('camera-current-image').closest('.camera-frame'),rect=frame.getBoundingClientRect(),bottom=Number(growthCalibration?.bottom_y??.94);
+  manualSurfaceDraft=Math.max(.01,Math.min(bottom-.005,(event.clientY-rect.top)/rect.height));renderGrowth();
+}
+function cancelManualCorrection(){manualSurfaceDraft=null;$('manual-editor').hidden=true;renderGrowth();}
+async function saveManualCorrection(){
+  const photo=photoLibrary.find(p=>String(p.id)===String(selectedFinalId));if(!photo||!Number.isFinite(manualSurfaceDraft))return;
+  const button=$('manual-correction-save');button.disabled=true;
+  try{
+    await json(`/api/growth/manual/${photo.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({fermentation_id:cameraFermentationId,surface_y_ratio:manualSurfaceDraft})});
+    manualSurfaceDraft=null;$('manual-editor').hidden=true;$('calibration-feedback').textContent='Correcció manual desada. La detecció automàtica original es conserva.';
+    await refreshCamera();
+  }catch(error){$('calibration-feedback').textContent=`No s’ha pogut desar la correcció: ${error.message}`;}
+  finally{button.disabled=false;}
+}
+async function deleteManualCorrection(){
+  const photo=photoLibrary.find(p=>String(p.id)===String(selectedFinalId));if(!photo?.manual_measurement?.valid)return;
+  const button=$('manual-correction-delete');button.disabled=true;
+  try{await json(`/api/growth/manual/${photo.id}?fermentation_id=${cameraFermentationId}`,{method:'DELETE'});manualSurfaceDraft=null;$('manual-editor').hidden=true;$('calibration-feedback').textContent='Correcció manual eliminada de la vista; l’historial d’auditoria es conserva.';await refreshCamera();}
+  catch(error){$('calibration-feedback').textContent=`No s’ha pogut eliminar la correcció: ${error.message}`;}
+  finally{button.disabled=false;}
 }
 
 function renderMonitoring(state) {
@@ -315,6 +388,8 @@ $('event-form').addEventListener('submit',async event=>{event.preventDefault();c
 
 let calibrationDrag=null;
 function renderCalibrationGuides(){const c=growthCalibration||{left_x:.32,right_x:.68,bottom_y:.94,initial_surface_y:.72};const overlay=$('calibration-overlay');overlay.style.setProperty('--guide-left',`${c.left_x*100}%`);overlay.style.setProperty('--guide-right',`${c.right_x*100}%`);overlay.style.setProperty('--guide-top',`${c.initial_surface_y*100}%`);overlay.style.setProperty('--guide-bottom',`${c.bottom_y*100}%`);document.querySelectorAll('[data-guide]').forEach(line=>{const key=line.dataset.guide;line.style.left=key.endsWith('_x')?`${c[key]*100}%`:'';line.style.top=key.endsWith('_y')?`${c[key]*100}%`:'';});}
+const calibrationDetails=document.querySelector('.calibration-settings');
+if(calibrationDetails)calibrationDetails.addEventListener('toggle',()=>{$('calibration-overlay').hidden=!calibrationDetails.open;});
 function syncCameraFrame(image){if(!image.naturalWidth||!image.naturalHeight)return;image.closest('.camera-frame').style.aspectRatio=`${image.naturalWidth}/${image.naturalHeight}`;}
 ['camera-reference-image','camera-current-image'].forEach(id=>$(id).addEventListener('load',event=>{syncCameraFrame(event.currentTarget);if(id==='camera-reference-image')renderCalibrationGuides();}));
 function cameraPoint(event){const frame=$('camera-reference-image').closest('.camera-frame'),r=frame.getBoundingClientRect(),image=$('camera-reference-image');let left=r.left,top=r.top,width=r.width,height=r.height;if(image.naturalWidth&&image.naturalHeight){const scale=Math.min(r.width/image.naturalWidth,r.height/image.naturalHeight);width=image.naturalWidth*scale;height=image.naturalHeight*scale;left+=(r.width-width)/2;top+=(r.height-height)/2;}return{x:Math.max(0,Math.min(1,(event.clientX-left)/width)),y:Math.max(0,Math.min(1,(event.clientY-top)/height))};}
@@ -330,6 +405,16 @@ function adjustCalibrationGuide(direction){
 }
 $('calibration-minus').addEventListener('click',()=>adjustCalibrationGuide(-1));
 $('calibration-plus').addEventListener('click',()=>adjustCalibrationGuide(1));
+renderCalibrationGuides();$('calibration-overlay').hidden=true;
+let manualPointerId=null;
+$('manual-correction-toggle').addEventListener('click',()=>{if($('manual-editor').hidden)beginManualCorrection();else cancelManualCorrection();});
+$('manual-correction-save').addEventListener('click',saveManualCorrection);
+$('manual-correction-cancel').addEventListener('click',cancelManualCorrection);
+$('manual-correction-delete').addEventListener('click',deleteManualCorrection);
+$('manual-surface-line').addEventListener('pointerdown',event=>{event.preventDefault();manualPointerId=event.pointerId;event.currentTarget.setPointerCapture(event.pointerId);manualSurfaceDragging=true;moveManualSurface(event);});
+$('manual-surface-line').addEventListener('pointermove',event=>{if(manualSurfaceDragging&&manualPointerId===event.pointerId)moveManualSurface(event);});
+for(const name of ['pointerup','pointercancel','lostpointercapture'])$('manual-surface-line').addEventListener(name,event=>{if(manualPointerId===event.pointerId){manualSurfaceDragging=false;manualPointerId=null;}});
+$('manual-surface-line').addEventListener('keydown',event=>{if(!manualSurfaceDraft)return;const delta=event.shiftKey?0.01:0.003;if(event.key==='ArrowUp'){event.preventDefault();manualSurfaceDraft=Math.max(.01,manualSurfaceDraft-delta);renderGrowth();}else if(event.key==='ArrowDown'){event.preventDefault();manualSurfaceDraft=Math.min(Number(growthCalibration.bottom_y)-.005,manualSurfaceDraft+delta);renderGrowth();}});
 function renderFermenter(data,historyData=null) {
   historyData=historyData||fermenterHistoryCache;
   const {config,runtime,schedule}=data,form=$('fermenter-form');
@@ -404,6 +489,7 @@ async function refreshFermenterOnly(){try{renderFermenter(await json('/api/ferme
 function stopPlayback(){if(timelapseTimer)clearInterval(timelapseTimer);timelapseTimer=null;$('timelapse-toggle').textContent='Reprodueix';}
 function selectPhoto(id,{manual=true}={}){
   const index=photoLibrary.findIndex(p=>String(p.id)===String(id));if(index<0)return;
+  if(String(selectedFinalId)!==String(id)){manualSurfaceDraft=null;$('manual-editor').hidden=true;}
   if(manual){stopPlayback();finalPinned=true;playbackEndId=id;}
   const photo=photoLibrary[index];selectedFinalId=photo.id;$('photo-select').value=String(photo.id);$('photo-latest').disabled=index===photoLibrary.length-1&&!finalPinned;
   $('camera-current-time').textContent=`${new Date(photo.captured_at).toLocaleString('ca-ES')} · fermentació #${photo.fermentation_id}`;
@@ -414,7 +500,7 @@ function selectPhoto(id,{manual=true}={}){
     const preload=new Image();preload.onload=()=>{if(sequence!==currentImageSequence||String(selectedFinalId)!==String(photo.id))return;image.src=src;image.hidden=false;currentImageReady=true;renderGrowth();};
     preload.onerror=()=>{if(sequence!==currentImageSequence)return;currentImageReady=false;$('growth-overlay-factor').textContent='Imatge no disponible';};preload.src=src;
   }
-  renderGrowth();drawGrowthChart(growthHistoryCache);
+  renderGrowth();drawGrowthChart(growthHistoryCache);renderTimelineMarkers();
 }
 function selectReference(id,{userInitiated=false,rebuild=true}={}){
   const photo=allPhotos.find(p=>String(p.id)===String(id));if(!photo)return;
@@ -435,9 +521,9 @@ function autoReferenceForFermentation(fermentation){return fermentation?Panetton
 function renderPhotoLibrary(rows){
   allPhotos=rows.filter(p=>p.camera_ok&&p.filename&&String(p.fermentation_id)===String(cameraFermentationId)).slice().sort((a,b)=>new Date(a.captured_at)-new Date(b.captured_at)||a.id-b.id);
   const ref=allPhotos.find(p=>String(p.id)===String(selectedReferenceId))||allPhotos[0];
-  if(!ref){photoLibrary=[];$('photo-select').replaceChildren();$('photo-reference-select').replaceChildren();$('camera-current-image').removeAttribute('src');$('camera-reference-image').removeAttribute('src');currentImageReady=false;++currentImageSequence;$('camera-current-image').hidden=true;$('camera-current-image').dataset.photoId='';$('camera-library-count').textContent='0 imatges disponibles';$('photo-timeline').disabled=true;$('photo-previous').disabled=true;$('photo-next').disabled=true;renderGrowth();drawGrowthChart([]);$('photo-grid').replaceChildren();$('photo-count').textContent='0 imatges';return;}
+  if(!ref){photoLibrary=[];$('photo-select').replaceChildren();$('photo-reference-select').replaceChildren();$('camera-current-image').removeAttribute('src');$('camera-reference-image').removeAttribute('src');currentImageReady=false;++currentImageSequence;$('camera-current-image').hidden=true;$('camera-current-image').dataset.photoId='';$('camera-library-count').textContent='0 imatges disponibles';$('photo-timeline').disabled=true;$('photo-previous').disabled=true;$('photo-next').disabled=true;renderGrowth();drawGrowthChart([]);renderTimelineMarkers();$('photo-grid').replaceChildren();$('photo-count').textContent='0 imatges';return;}
   selectedReferenceId=ref.id;photoLibrary=allPhotos.filter(p=>new Date(p.captured_at)>=new Date(ref.captured_at));
-  for(const [id,photos] of [['photo-select',photoLibrary],['photo-reference-select',allPhotos]]){const select=$(id);select.replaceChildren();for(const photo of photos){const option=document.createElement('option');option.value=String(photo.id);option.textContent=new Date(photo.captured_at).toLocaleString('ca-ES');select.append(option);}}
+  for(const [id,photos] of [['photo-select',photoLibrary],['photo-reference-select',allPhotos]]){const select=$(id);select.replaceChildren();for(const photo of photos){const option=document.createElement('option');option.value=String(photo.id);option.textContent=fmtTime(photo.captured_at);select.append(option);}}
   $('photo-reference-select').value=String(ref.id);$('camera-reference-image').hidden=false;$('camera-reference-image').src=`/photos/${encodeURIComponent(ref.filename)}?revision=${ref.image_revision||''}`;$('camera-reference-time').textContent=new Date(ref.captured_at).toLocaleString('ca-ES');
   const slider=$('photo-timeline');slider.max=String(Math.max(0,photoLibrary.length-1));slider.disabled=photoLibrary.length<2;
   $('camera-library-count').textContent=`${photoLibrary.length} imatges disponibles`;
@@ -468,7 +554,7 @@ function resetCameraSelection({forget=true}={}){
   if(forget)cameraSelections.delete(String(cameraFermentationId));
   stopPlayback();clearTimeout(cameraAnalysisTimer);++cameraRequestSequence;++currentImageSequence;
   selectedReferenceId=null;selectedFinalId=null;growthCalibration=null;savedGrowthCalibration=null;vesselCalibration=null;
-  calibrationDirty=false;calibrationTouched=false;explicitReferenceSelection=false;finalPinned=false;playbackEndId=null;
+  calibrationDirty=false;calibrationTouched=false;explicitReferenceSelection=false;finalPinned=false;playbackEndId=null;manualSurfaceDraft=null;$('manual-editor').hidden=true;
   currentImageReady=false;displayCalibrationSignature=null;growthHistoryCache=[];allPhotos=[];photoLibrary=[];
   for(const id of ['camera-current-image','camera-reference-image']){const image=$(id);image.hidden=true;image.removeAttribute('src');image.dataset.photoId='';image.dataset.imageRevision='';}
   $('camera-reference-time').textContent='—';$('camera-current-time').textContent='—';$('calibration-feedback').textContent='';
@@ -626,4 +712,4 @@ let timer;
 window.addEventListener('resize',()=>{clearTimeout(timer);timer=setTimeout(refresh,200)});
 showPage(location.hash.slice(1),false);refresh();setInterval(refresh,30000);
 setInterval(refreshFermenterOnly,5000);
-if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.11.1',{updateViaCache:'none'}).catch(()=>{});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.11.2',{updateViaCache:'none'}).catch(()=>{});

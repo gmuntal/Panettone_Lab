@@ -65,6 +65,24 @@ class VisualCacheTests(unittest.TestCase):
     def test_missing_image_is_unavailable_and_no_invented_percent(self):
         (Path(database.settings.photo_dir)/'2.png').unlink()
         result=self.cache()['frames'][1]['measurement'];self.assertFalse(result['valid']);self.assertNotIn('percent',result)
+    def test_manual_surface_is_audited_and_does_not_overwrite_automatic_result(self):
+        before=service.sequence(1,enqueue=False)['frames'][1]['measurement']
+        first=service.set_manual_measurement(1,2,.60)
+        frame=service.sequence(1,enqueue=False)['frames'][1]
+        self.assertEqual(frame['measurement'],before)
+        self.assertTrue(frame['manual_measurement']['valid'])
+        self.assertEqual(frame['manual_measurement']['source'],'authenticated_user')
+        self.assertEqual(first['calibration_data'],json.dumps(self.cal,sort_keys=True))
+        service.set_manual_measurement(1,2,.62)
+        with database.connect() as db:
+            rows=db.execute('SELECT active,surface_y_ratio FROM visual_manual_measurements WHERE photo_id=2 ORDER BY id').fetchall()
+            self.assertEqual([(row['active'],row['surface_y_ratio']) for row in rows],[(0,.60),(1,.62)])
+        self.assertTrue(service.remove_manual_measurement(1,2))
+        after=service.sequence(1,enqueue=False)['frames'][1]
+        self.assertEqual(after['measurement'],before)
+        self.assertIsNone(after['manual_measurement'])
+        with database.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM visual_manual_measurements WHERE photo_id=2').fetchone()[0],2)
     def test_background_worker_is_deduplicated_and_does_not_call_devices(self):
         import threading
         wait=threading.Event();entered=threading.Event();original=service.prepare_reference

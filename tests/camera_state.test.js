@@ -62,6 +62,28 @@ test('milestones are first observed reliable frames without interpolated crossin
   assert.equal(state.thresholdState(80),'normal');assert.equal(state.thresholdState(null),'unavailable');
   assert.equal(state.thresholdState(100),'doubled');assert.equal(state.thresholdState(200),'tripled');
 });
+test('manual corrections remain visible as a separate series and do not create automatic milestones',()=>{
+  const corrected=[
+    {id:1,captured_at:'2026-10-18T12:00:00Z',measurement:{valid:true,percent:0},manual_measurement:null},
+    {id:2,captured_at:'2026-10-18T12:02:00Z',measurement:{valid:false},manual_measurement:{valid:true,percent:125}}
+  ];
+  const series=state.series(corrected,corrected[0],corrected[1]);
+  assert.deepEqual(series.map(p=>p.measurement_source),['automatic','manual']);
+  assert.deepEqual(series.map(p=>p.growth_score),[0,125]);
+  assert.deepEqual(state.milestones(series,corrected[0]),[]);
+});
+test('timeline markers are derived only from automatic measurements and long detection gaps',()=>{
+  const rows=[
+    {id:1,captured_at:'2026-10-18T12:00:00Z',measurement:{valid:true,percent:0}},
+    {id:2,captured_at:'2026-10-18T12:02:00Z',measurement:{valid:true,percent:100}},
+    {id:3,captured_at:'2026-10-18T12:04:00Z',measurement:{valid:false,quality:'uncertain'}},
+    {id:4,captured_at:'2026-10-18T12:06:00Z',measurement:{valid:false,quality:'unavailable'}},
+    {id:5,captured_at:'2026-10-18T12:08:00Z',measurement:{valid:false,quality:'uncertain'},manual_measurement:{valid:true,percent:200}}
+  ];
+  const marks=state.markers(rows);
+  assert.deepEqual(marks.map(m=>m.kind),['doubled','peak','gap']);
+  assert.equal(marks.some(m=>m.kind==='tripled'),false);
+});
 test('sampling thumbnails does not alter graph frames or the playback interval',()=>{
   for(const interval of ['all','5','10','15','20','30']){
     assert.equal(state.sample(frames,interval)[0].id,6);

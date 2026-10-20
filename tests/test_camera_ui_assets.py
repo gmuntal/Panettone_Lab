@@ -43,6 +43,19 @@ class CameraUiAssetTests(unittest.TestCase):
         self.assertNotIn('id="camera-range"', html)
         self.assertIn('id="growth-overlay"', html)
 
+    def test_manual_surface_editor_and_calibration_controls_are_present(self):
+        html = (ROOT / "app/templates/dashboard.html").read_text()
+        css = (ROOT / "app/static/app.css").read_text()
+        javascript = (ROOT / "app/static/app.js").read_text()
+        self.assertIn('id="manual-surface-line"', html)
+        self.assertIn('id="manual-correction-save"', html)
+        self.assertIn('<details class="calibration-settings">', html)
+        self.assertIn('overflow:clip', css)
+        self.assertIn('env(safe-area-inset-bottom)', css)
+        self.assertIn('id="timeline-markers"', html)
+        self.assertIn('function detectionExplanation', javascript)
+        self.assertIn("/api/growth/manual/", javascript)
+
     def test_phone_and_desktop_camera_layout_rules_exist(self):
         css = (ROOT / "app/static/app.css").read_text()
         self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", css)

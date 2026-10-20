@@ -1,16 +1,16 @@
-const CACHE='panettone-lab-v0.11.1';
+const CACHE='panettone-lab-v0.11.2';
 const SHELL=[
   '/login',
-  '/static/app.css?v=0.11.1',
-  '/static/camera-state.js?v=0.11.1',
-  '/static/app.js?v=0.11.1',
-  '/static/icons/apple-touch-icon.png?v=0.11.1',
-  '/static/icons/favicon-32.png?v=0.11.1',
-  '/static/icons/favicon.ico?v=0.11.1',
-  '/static/icons/icon-192.png?v=0.11.1',
-  '/static/icons/icon-512.png?v=0.11.1',
-  '/static/icons/icon-maskable-512.png?v=0.11.1',
-  '/manifest.webmanifest?v=0.11.1'
+  '/static/app.css?v=0.11.2',
+  '/static/camera-state.js?v=0.11.2',
+  '/static/app.js?v=0.11.2',
+  '/static/icons/apple-touch-icon.png?v=0.11.2',
+  '/static/icons/favicon-32.png?v=0.11.2',
+  '/static/icons/favicon.ico?v=0.11.2',
+  '/static/icons/icon-192.png?v=0.11.2',
+  '/static/icons/icon-512.png?v=0.11.2',
+  '/static/icons/icon-maskable-512.png?v=0.11.2',
+  '/manifest.webmanifest?v=0.11.2'
 ];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('panettone-lab-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
@@ -27,7 +27,7 @@ self.addEventListener('push',event=>{
   let payload={};try{payload=event.data?.json()||{}}catch{}
   const title=payload.title||'Panettone Lab';
   event.waitUntil(self.registration.showNotification(title,{body:payload.body||'Hi ha una actualització.',
-    icon:'/static/icons/icon-192.png?v=0.11.1',badge:'/static/icons/icon-192.png?v=0.11.1',
+    icon:'/static/icons/icon-192.png?v=0.11.2',badge:'/static/icons/icon-192.png?v=0.11.2',
     tag:payload.tag||payload.category||'panettone-lab',data:{url:payload.url||'/#home'}}));
 });
 self.addEventListener('notificationclick',event=>{

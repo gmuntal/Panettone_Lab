@@ -1,4 +1,6 @@
-# Panettone Lab v0.11.0
+# Panettone Lab v0.11.2
+
+v0.11.2 millora la revisió del creixement: permet corregir manualment la superfície amb auditoria separada, explica les deteccions automàtiques dubtoses, simplifica el calibratge, retalla les superposicions a cada fotografia i afegeix marcadors a la cronologia. La vista mòbil dona més espai a la càmera i respecta les zones segures de la pantalla. La detecció de moviment i la validació en un iPhone físic encara no s'han verificat; consulta les [notes de la versió](docs/v0.11.2.md).
 
 v0.11.0 afegeix l'ajust auditat del període de fermentacions finalitzades, la pausa de càmera per sessió i una prova física temporitzada de manta protegida. També incorpora comparació/timelapse, monitoratge de recursos, notificacions, exportació i arxivament intel·ligent. Decisions de seguretat i límits: [guia v0.11.0](docs/v0.11.0.md).
 
