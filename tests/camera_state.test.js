@@ -117,3 +117,91 @@ test('late sequence response cannot replace newer fermentation results',async()=
   pending[1](response);await second;pending[0]({...response,calibration_signature:'old'});await first;
   assert.equal(c.run('displayCalibrationSignature'),'new');
 });
+
+test('switching to active fermentation works with a dirty calibration and clears old photos immediately',async()=>{
+  const c=controller(),queue=[];c.context.queue=queue;
+  c.run('json=()=>new Promise(resolve=>queue.push(resolve));calibrationDirty=true;calibrationTouched=true;growthCalibration.left_x=.23;');
+  const selector=c.elements.get('camera-fermentation');selector.value='3';selector.change({currentTarget:selector});
+  assert.equal(c.run('cameraFermentationId'),3);
+  assert.equal(c.run('allPhotos.length'),0);assert.equal(c.run('photoLibrary.length'),0);
+  assert.equal(c.elements.get('camera-current-image').hidden,true);
+  assert.equal(c.elements.get('growth-overlay-percent').textContent,'—');
+  assert.match(c.elements.get('camera-load-status').textContent,/Carregant.*#3/);
+});
+
+function sequenceResponse(id){
+  const offset=id===2?0:id*100;
+  const items=frames.map(p=>({...p,id:p.id+offset,filename:(p.id+offset)+'.jpg',fermentation_id:id,camera_ok:1,image_revision:'same'}));
+  return {fermentation_id:id,reference_id:items[0].id,calibration:{photo_id:items[0].id,left_x:id/10,right_x:.9,bottom_y:.9,initial_surface_y:.7},vessel:{},frames:items,calibration_signature:'calibration-'+id,pending:0};
+}
+async function changeFermentation(c,id){
+  const selector=c.elements.get('camera-fermentation');selector.value=String(id);selector.change({currentTarget:selector});
+  await Promise.resolve();await Promise.resolve();
+}
+test('finalized, active and archived selections cycle without mixing photographs, calibration or drafts',async()=>{
+  const c=controller();c.context.responses={1:sequenceResponse(1),2:sequenceResponse(2),3:sequenceResponse(3)};
+  c.run("fermentationsCache=[{id:3,started_at:'2026-10-18',ended_at:null},{id:2,started_at:'2026-10-17',ended_at:'2026-10-18'},{id:1,started_at:'2026-10-16',ended_at:'2026-10-17',archived_at:'2026-10-18'}];activeFermentation=fermentationsCache[0];json=async url=>responses[new URL(url,'http://localhost').searchParams.get('fermentation_id')];");
+  // URL is supplied only to the test context, not to production state.
+  c.context.URL=URL;
+  for(const id of [3,2,3,1,3,2]){
+    await changeFermentation(c,id);
+    assert.equal(c.run('cameraFermentationId'),id);assert.equal(c.elements.get('camera-fermentation').value,String(id));
+    assert.equal(c.run('allPhotos.every(p=>p.fermentation_id===cameraFermentationId)'),true);
+    assert.equal(c.run('growthCalibration.left_x'),id/10);
+    assert.equal(c.run('selectedReferenceId'),c.context.responses[id].reference_id);
+    c.run('renderCameraFermentations()');assert.equal(c.run('cameraFermentationId'),id);
+  }
+  c.run('calibrationDirty=true;calibrationTouched=true;growthCalibration.left_x=.234;');
+  await changeFermentation(c,3);assert.equal(c.run('growthCalibration.left_x'),.3);
+  await changeFermentation(c,2);assert.equal(c.run('growthCalibration.left_x'),.234);assert.equal(c.run('calibrationDirty'),true);
+});
+test('new active photographs extend timeline without moving a pinned cursor; latest explicitly resumes following',async()=>{
+  const c=controller();c.context.response=sequenceResponse(2);c.run('json=async()=>response;cameraFollowsActive=false;selectPhoto(2)');
+  const reference=c.run('selectedReferenceId'),left=c.run('growthCalibration.left_x');
+  c.context.response.frames.push({...c.context.response.frames.at(-1),id:7,captured_at:'2026-10-18T13:00:00Z',filename:'7.jpg'});
+  await c.run('refreshCamera()');assert.equal(c.run('selectedFinalId'),2);assert.equal(c.elements.get('photo-timeline').max,'6');
+  assert.equal(c.run('selectedReferenceId'),reference);
+  c.elements.get('photo-latest').click();assert.equal(c.run('selectedFinalId'),7);assert.equal(c.run('finalPinned'),false);
+  c.context.response.frames.push({...c.context.response.frames.at(-1),id:8,filename:'8.jpg',captured_at:'2026-10-18T13:02:00Z'});
+  await c.run('refreshCamera()');assert.equal(c.run('selectedFinalId'),8);
+  assert.equal(c.run('growthCalibration.left_x'),.2);
+});
+test('polling preserves native selector nodes and does not rewrite a pending native picker value',()=>{
+  const c=controller();c.run("cameraFollowsActive=false;fermentationsCache=[{id:3,started_at:'2026-10-18',ended_at:null},{id:2,started_at:'2026-10-17',ended_at:'2026-10-18'}];renderCameraFermentations()");
+  const selector=c.elements.get('camera-fermentation'),option=selector.children[0];
+  selector.value='3';c.run('renderCameraFermentations()');assert.equal(selector.value,'3');assert.equal(selector.children[0],option);
+});
+test('late request failures and image completions from another fermentation cannot alter the new view',async()=>{
+  const c=controller();const image=c.images.at(-1),queue=[];c.context.queue=queue;c.run('json=()=>new Promise((resolve,reject)=>queue.push({resolve,reject}))');
+  const old=c.run('refreshCamera()');await changeFermentation(c,3);
+  queue[1].resolve(sequenceResponse(3));await Promise.resolve();await Promise.resolve();
+  const status=c.elements.get('camera-load-status').textContent;
+  queue[0].reject(new Error('Old server error'));await old;image.onload();
+  assert.equal(c.elements.get('camera-load-status').textContent,status);
+  assert.equal(c.elements.get('camera-current-image').hidden,true);
+  c.images.at(-1).onload();assert.equal(c.run('selectedFinalId'),306);assert.equal(c.run('growthCalibration.left_x'),.3);
+});
+test('failed selection shows its own error with an empty view and can be retried',async()=>{
+  const c=controller();c.run("json=async()=>{throw new Error('HTTP 503')}");
+  await changeFermentation(c,3);assert.equal(c.run('cameraFermentationId'),3);assert.equal(c.run('photoLibrary.length'),0);
+  assert.match(c.elements.get('camera-load-status').textContent,/#3.*HTTP 503/);
+  c.context.response=sequenceResponse(3);c.run('json=async()=>response');await c.run('refreshCamera()');
+  assert.equal(c.run('photoLibrary.length'),6);assert.equal(c.run('growthCalibration.left_x'),.3);
+});
+
+test('calibration save finishing after a selection change cannot hydrate the other fermentation',async()=>{
+  const c=controller(),queue=[];c.context.queue=queue;c.run('json=()=>new Promise(resolve=>queue.push(resolve))');
+  const submitted=c.run('({...growthCalibration,photo_id:1})');
+  const saving=c.run('saveGrowthCalibration(input[0])');await changeFermentation(c,3);
+  queue[1](sequenceResponse(3));await Promise.resolve();await Promise.resolve();
+  queue[0]({});await Promise.resolve();queue[2]({calibration:submitted});await saving;
+  assert.equal(c.run('growthCalibration.left_x'),.3);assert.equal(c.run('savedGrowthCalibration.photo_id'),301);
+  assert.equal(c.elements.get('calibration-feedback').textContent,'');
+});
+test('calibration reset finishing after a selection change cannot clear the other fermentation',async()=>{
+  const c=controller(),queue=[];c.context.queue=queue;c.run('json=()=>new Promise(resolve=>queue.push(resolve))');
+  const resetting=c.elements.get('calibration-reset').click();await changeFermentation(c,3);
+  queue[1](sequenceResponse(3));await Promise.resolve();await Promise.resolve();queue[0]({});await resetting;
+  assert.equal(c.run('cameraFermentationId'),3);assert.equal(c.run('photoLibrary.length'),6);
+  assert.equal(c.run('growthCalibration.photo_id'),301);assert.equal(c.elements.get('calibration-feedback').textContent,'');
+});

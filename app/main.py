@@ -32,7 +32,7 @@ from .resources import resource_snapshot
 from . import push
 from . import archiving
 
-APP_VERSION = "0.11.0"
+APP_VERSION = "0.11.1"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
