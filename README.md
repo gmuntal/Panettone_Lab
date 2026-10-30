@@ -1,4 +1,6 @@
-# Panettone Lab v0.12.2
+# Panettone Lab v0.13.0
+
+v0.13.0 replanteja la navegació per a nous usuaris: quatre seccions principals, «Eines» agrupa fotografies i ajustos, i el resum separa explícitament el registre automàtic de les sessions de fermentació. Si no hi ha cap fermentació activa, ofereix començar-ne una directament des del resum. No modifica la recollida de dades, l’autenticació, SQLite ni el control tèrmic. [Notes v0.13.0](docs/v0.13.0.md).
 
 v0.12.2 simplifica la pantalla d’inici: agrupa les lectures en una graella compacta també al mòbil i deixa la gràfica i la captura recent dins «Historial i fotografies», plegat inicialment. Les seccions i funcions continuen disponibles. No canvia APIs, autenticació, SQLite, recollida de dades ni control tèrmic. [Notes v0.12.2](docs/v0.12.2.md).
 

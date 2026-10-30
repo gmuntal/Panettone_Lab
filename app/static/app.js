@@ -49,8 +49,8 @@ async function refreshFermentation(sequence=null) {
   fermentationsCache=data.items||[];
   activeFermentation=data.active;
   $('session-status').textContent=activeFermentation
-    ? `Fermentació #${activeFermentation.id} activa des de ${fmtTime(activeFermentation.started_at)}. Les lectures ambientals s’hi associen${activeFermentation.camera_enabled?' i el seguiment fotogràfic està actiu.':'; les fotografies estan pausades en aquesta sessió.'}`
-    : 'No hi ha cap fermentació activa. Les lectures continuen funcionant independentment.';
+    ? `Fermentació #${activeFermentation.id} en curs des de ${fmtTime(activeFermentation.started_at)}. Les lectures ambientals s’hi associen${activeFermentation.camera_enabled?' i el registre de fotos està actiu.':'; les fotos estan pausades en aquesta fermentació.'}`
+    : 'No hi ha cap fermentació en curs. El registre automàtic de lectures i fotos es controla per separat.';
   $('fermentation-form').hidden=Boolean(activeFermentation);
   $('end-fermentation').hidden=!activeFermentation;
   renderFermentations();
@@ -78,11 +78,16 @@ function fermentationMetrics(item){
 }
 function renderFermentations(){
   const current=activeFermentation;
-  const home=$('home-fermentation');home.hidden=!current;
+  const home=$('home-fermentation');home.hidden=false;
+  $('home-fermentation-empty').hidden=Boolean(current);
+  $('home-fermentation-grid').hidden=!current;
+  const action=$('home-fermentation-action');
+  action.textContent=current?'Obre la fermentació':'Comença una fermentació';
+  action.dataset.open=current?'':'session-panel';
+  $('home-fermentation-title').textContent=current?`Fermentació #${current.id}`:'Cap fermentació en curs';
   $('fermentation-live').classList.toggle('paused',!current);
   $('fermentation-live').innerHTML=`<i></i> ${current?'EN CURS':'SENSE FERMENTACIÓ ACTIVA'}`;
   if(current){
-    $('home-fermentation-title').textContent=`Fermentació #${current.id}`;
     $('home-fermentation-elapsed').textContent=elapsedSince(current.started_at);
     $('home-fermentation-ph').textContent=current.initial_ph===null?'No registrat':`${Number(current.initial_ph).toFixed(2)} pH`;
     const phEvents=(current.events||[]).filter(event=>event.ph!==null&&event.ph!==undefined);
@@ -97,7 +102,7 @@ function renderFermentations(){
     (current.events||[]).slice().reverse().forEach(event=>{const li=document.createElement('li');const title=document.createElement('strong');title.textContent=eventLabels[event.event_type]||event.event_type;const time=document.createElement('time');time.textContent=new Date(event.occurred_at).toLocaleString('ca-ES');const detail=document.createElement('span');const parts=[];if(event.ph!==null)parts.push(`pH ${Number(event.ph).toFixed(2)}`);if(event.dough_temp_c!==null)parts.push(`massa ${Number(event.dough_temp_c).toFixed(1)} °C`);if(event.starter_mass_g!==null)parts.push(`massa mare ${amount(event.starter_mass_g)}`);if(event.flour_g!==null)parts.push(`farina ${amount(event.flour_g)}`);if(event.water_g!==null)parts.push(`aigua ${amount(event.water_g)}`);if(event.hydration_pct!==null)parts.push(`hidratació registrada ${Number(event.hydration_pct).toFixed(1)}%`);if(event.details)parts.push(event.details);detail.textContent=parts.join(' · ')||'Sense detalls addicionals registrats';li.append(title,time,detail);timeline.append(li);});
     $('export-active-fermentation').href=`/api/fermentations/${current.id}/export`;$('export-active-fermentation').dataset.exportUrl=`/api/fermentations/${current.id}/export`;$('export-active-fermentation').hidden=false;
   }else{
-    $('fermentation-detail-status').textContent='No hi ha cap fermentació activa. Pots iniciar-ne una al formulari de registre.';
+    $('fermentation-detail-status').textContent='No hi ha cap fermentació en curs. Comença’n una per agrupar-hi mesures i anotacions.';
     $('fermentation-detail-grid').replaceChildren();$('fermentation-timeline').replaceChildren();$('export-active-fermentation').hidden=true;$('export-active-fermentation').dataset.exportUrl='';
   }
   const sort=$('fermentation-sort')?.value||'date';const older=fermentationsCache.filter(item=>item.ended_at).slice().sort((a,b)=>sort==='storage'?(b.storage?.photo_bytes||0)-(a.storage?.photo_bytes||0):sort==='photos'?(b.storage?.available_photos||0)-(a.storage?.available_photos||0):new Date(b.started_at)-new Date(a.started_at)),list=$('fermentation-history');
@@ -151,10 +156,11 @@ function renderArchivePreview(item,plan,container,previewButton,select){
 }
 
 function showPage(name,writeHistory=true){
-  const valid=['home','fermenter','fermentations','camera','settings'].includes(name)?name:'home';
+  const valid=['home','fermenter','fermentations','camera','settings','more'].includes(name)?name:'home';
   if(valid!=='camera'&&timelapseTimer){clearInterval(timelapseTimer);timelapseTimer=null;$('timelapse-toggle').textContent='Reprodueix timelapse';}
   document.querySelectorAll('[data-page]').forEach(section=>{const selected=section.dataset.page===valid;section.hidden=!selected;section.classList.toggle('is-active',selected);});
-  document.querySelectorAll('[data-view]').forEach(button=>{const selected=button.dataset.view===valid;button.classList.toggle('is-active',selected);if(selected)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
+  const selectedView=['camera','settings'].includes(valid)?'more':valid;
+  document.querySelectorAll('[data-view]').forEach(button=>{const selected=button.dataset.view===selectedView;button.classList.toggle('is-active',selected);if(selected)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
   if(writeHistory)history.replaceState(null,'',`#${valid}`);
   if(valid==='home')drawChart(readingsCache);
   if(valid==='fermenter'&&fermenterHistoryCache.readings.length)drawFermenterChart(fermenterHistoryCache.readings,fermenterHistoryCache.actions,Number($('fermenter-form').elements.target_c.value));
@@ -223,7 +229,11 @@ document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener
 document.getElementById('home-history-details')?.addEventListener('toggle',event=>{
   if(event.currentTarget.open) requestAnimationFrame(()=>drawChart(readingsCache));
 });
-document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>showPage(button.dataset.go)));
+document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>{
+  showPage(button.dataset.go);
+  const target=button.dataset.open?document.getElementById(button.dataset.open):null;
+  if(target){target.open=true;requestAnimationFrame(()=>target.scrollIntoView({behavior:'smooth',block:'center'}));}
+}));
 window.addEventListener('hashchange',()=>showPage(location.hash.slice(1),false));
 document.querySelectorAll('[data-fermentation-tab]').forEach(button=>button.addEventListener('click',()=>{
   const name=button.dataset.fermentationTab;
@@ -289,7 +299,7 @@ function renderChartTable(ambientTemp,doughTemp,humidity){
   for(const point of points){const tr=document.createElement('tr');for(const value of [point.label,new Date(point.time).toLocaleString('ca-ES'),`${point.value.toLocaleString('ca-ES',{maximumFractionDigits:1})} ${point.unit}`]){const td=document.createElement('td');td.textContent=value;tr.append(td);}body.append(tr);}
 }
 
-const probeLabels={disabled:'Sonda desactivada',paused:'Seguiment aturat',waiting:'Esperant primera lectura',stale:'Lectura antiga',token_not_configured:'Falta configurar el token al servidor',timeout:'Sonda sense resposta',connection_failed:'Sense connexió amb la sonda',authentication_failed:'Token de sonda incorrecte',invalid_sensor_reading:'Lectura de sonda no vàlida',unexpected_sensor:'Sonda diferent de l’esperada',repeated_or_regressed_sample:'La sonda repeteix una mostra antiga'};
+const probeLabels={disabled:'Sonda desactivada',paused:'Registre automàtic aturat',waiting:'Esperant primera lectura',stale:'Lectura antiga',token_not_configured:'Falta configurar el token al servidor',timeout:'Sonda sense resposta',connection_failed:'Sense connexió amb la sonda',authentication_failed:'Token de sonda incorrecte',invalid_sensor_reading:'Lectura de sonda no vàlida',unexpected_sensor:'Sonda diferent de l’esperada',repeated_or_regressed_sample:'La sonda repeteix una mostra antiga'};
 function renderProbeTemperature(value){
   const metric=$('dough-temperature'),unit=document.createElement('small');unit.textContent='°C';
   metric.replaceChildren(document.createTextNode(Number.isFinite(value)?value.toFixed(1):'—'),unit);
@@ -445,11 +455,11 @@ async function deleteManualCorrection(){
 function renderMonitoring(state) {
   const badge=$('monitoring-status'),button=$('monitoring-button');
   badge.classList.toggle('paused',!state.active);
-  badge.innerHTML=`<i></i> ${state.active?'SEGUIMENT ACTIU':'ATURAT'}`;
-  button.textContent=state.active?'Atura seguiment':'Inicia seguiment';
+  badge.innerHTML=`<i></i> ${state.active?'REGISTRE ACTIU':'REGISTRE ATURAT'}`;
+  button.textContent=state.active?'Atura registre':'Inicia registre';
   button.classList.toggle('stop',state.active);
   const camera=$('camera-status');
-  if(!state.active){camera.className='camera-status paused';camera.querySelector('span').textContent='Seguiment aturat';}
+  if(!state.active){camera.className='camera-status paused';camera.querySelector('span').textContent='Registre automàtic aturat';}
 }
 
 function ageText(timestamp){
@@ -512,7 +522,7 @@ function renderCameraFreshness(photo,monitoring){
   const ageSeconds=Math.max(0,(Date.now()-new Date(photo.captured_at).getTime())/1000);
   const limit=Math.max(120,Number(camera.dataset.intervalSeconds||120)*2);
   const recent=Number.isFinite(ageSeconds)&&ageSeconds<=limit;
-  if(!monitoring.active||pausedInSession){camera.className='camera-status paused';label.textContent=pausedInSession?'Pausada en aquesta fermentació':'Seguiment aturat';}
+  if(!monitoring.active||pausedInSession){camera.className='camera-status paused';label.textContent=pausedInSession?'Fotos pausades en aquesta fermentació':'Registre automàtic aturat';}
   else{camera.className=`camera-status ${recent?'ok':'stale'}`;label.textContent=recent?'Darrera captura recent':'Darrera captura antiga';}
   $('photo-time').textContent=`Captura vàlida · ${fmtTime(photo.captured_at)} · ${ageText(photo.captured_at)}${recent?'':' · no actualitzada'}`;
 }

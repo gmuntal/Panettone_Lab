@@ -260,4 +260,15 @@ html{min-height:100%}body{min-height:100vh;min-height:100dvh}
   .home-history-content>.panel{padding:13px 8px;margin:8px 0}
 }
 @media(max-width:360px){.metrics{grid-template-columns:minmax(0,1fr)}.metric-card,.metric-card.status-card{min-height:0}}
+
+/* Simplified navigation and the two less frequently used tools. */
+@media(max-width:760px){.app-nav{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.tool-links{grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch}
+.tool-link{width:100%;display:grid;grid-template-columns:36px minmax(0,1fr) 20px;grid-template-rows:auto auto;align-items:center;gap:4px 12px;text-align:left;color:var(--ink);font:inherit;background:#fff;cursor:pointer}
+.tool-link>span{grid-row:1/3;width:36px;height:36px;display:grid;place-items:center;border-radius:11px;background:var(--mint);color:var(--green);font-size:18px}
+.tool-link>strong{font-size:13px}
+.tool-link>small{font-size:10px;line-height:1.4;color:var(--muted)}
+.tool-link>b{grid-column:3;grid-row:1/3;font-size:20px;color:var(--muted);text-align:right}
+.home-fermentation-empty{max-width:600px;line-height:1.5}
+@media(max-width:760px){.tool-links{grid-template-columns:1fr}.home-fermentation>.panel-heading{align-items:center}.home-fermentation #home-fermentation-action{white-space:normal}}
 .manual-editor-actions .secondary-button{min-height:44px}
