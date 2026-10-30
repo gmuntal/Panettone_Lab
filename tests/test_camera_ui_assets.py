@@ -56,6 +56,30 @@ class CameraUiAssetTests(unittest.TestCase):
         self.assertIn('function detectionExplanation', javascript)
         self.assertIn("/api/growth/manual/", javascript)
 
+    def test_dashboard_exposes_data_freshness_errors_and_an_accessible_chart_table(self):
+        html = (ROOT / "app/templates/dashboard.html").read_text()
+        javascript = (ROOT / "app/static/app.js").read_text()
+        self.assertIn('id="sensor-freshness"', html)
+        self.assertIn('id="dashboard-refresh"', html)
+        self.assertIn('id="dashboard-feedback"', html)
+        self.assertIn('aria-describedby="chart-description"', html)
+        self.assertIn('id="chart-data-body"', html)
+        self.assertIn("renderReadingFreshness", javascript)
+        self.assertIn("Darrera captura antiga", javascript)
+        self.assertIn("l’últim intent ha fallat", javascript)
+
+    def test_mobile_dashboard_uses_one_column_and_touch_sized_controls(self):
+        css = (ROOT / "app/static/app.css").read_text()
+        self.assertIn(".metrics{grid-template-columns:minmax(0,1fr);gap:8px}", css)
+        self.assertIn("@media(max-width:380px)", css)
+        self.assertIn(".secondary-button,.logout,button,select,input:not([type=checkbox]){min-height:44px", css)
+        self.assertIn(".chart-data-table", css)
+
+    def test_private_apis_and_photos_remain_excluded_from_service_worker_cache(self):
+        worker = (ROOT / "app/static/service-worker.js").read_text()
+        self.assertIn("url.pathname.startsWith('/api/')", worker)
+        self.assertIn("url.pathname.startsWith('/photos/')", worker)
+
     def test_phone_and_desktop_camera_layout_rules_exist(self):
         css = (ROOT / "app/static/app.css").read_text()
         self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", css)
@@ -65,7 +89,8 @@ class CameraUiAssetTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
     def test_frontend_regressions_in_node(self):
         subprocess.run(["node", "--test", str(ROOT / "tests/camera_state.test.js"),
-                        str(ROOT / "tests/probe-chart.test.js")],
+                        str(ROOT / "tests/probe-chart.test.js"),
+                        str(ROOT / "tests/dashboard-state.test.js")],
                        check=True, cwd=ROOT, capture_output=True, text=True)
 
 

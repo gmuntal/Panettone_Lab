@@ -134,6 +134,80 @@ html{min-height:100%}body{min-height:100vh;min-height:100dvh}
 .timeline-markers[hidden]{display:none}.timeline-marker{flex:none;max-width:min(76vw,260px);padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:#f7faf7;color:var(--green);font:600 10px inherit;text-align:left;white-space:normal}
 .timeline-marker.doubled,.timeline-marker.tripled{border-color:#e5d3ae;background:#fffaf0}.timeline-marker.drop,.timeline-marker.gap{border-color:#ecd8d3;background:#fff8f6;color:#9b4e43}
 .timeline-control>span{font-size:10px;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* Dashboard UX refresh: clear freshness, chart scales and touch targets. */
+.dashboard-status{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:-10px 0 16px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.data-freshness{display:inline-flex;align-items:center;gap:8px;min-height:28px;color:#315f4c;font-size:11px;font-weight:700}
+.data-freshness i{width:9px;height:9px;border-radius:50%;background:#4b9b70;box-shadow:0 0 0 3px #4b9b7020}
+.data-freshness.stale{color:#855b22}.data-freshness.stale i{background:#ca8d37;box-shadow:0 0 0 3px #ca8d3720}
+.data-freshness.unknown{color:#586a62}.data-freshness.unknown i{background:#9aa69f;box-shadow:0 0 0 3px #9aa69f20}
+.dashboard-refresh{font-size:11px;color:#56675f;font-variant-numeric:tabular-nums}
+.dashboard-feedback{flex-basis:100%;margin:0;padding:8px 10px;border-radius:8px;background:#fff3ed;color:#8c3c30;font-size:12px;line-height:1.45}
+.dashboard-feedback[hidden]{display:none}
+.camera-status.stale{color:#855b22}.camera-status.stale i{background:#ca8d37;box-shadow:0 0 0 3px #ca8d3720}
+.camera-status.unknown{color:#586a62}.camera-status.unknown i{background:#9aa69f;box-shadow:0 0 0 3px #9aa69f20}
+.metrics{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.metric-card{min-width:0;padding:17px 16px;min-height:120px}
+.metric-label{line-height:1.4}.metric-value{font-variant-numeric:tabular-nums}
+.metric-foot{color:#687970;font-size:11px;line-height:1.45;overflow-wrap:anywhere}
+.panel-heading h2{line-height:1.25}
+.chart-legend{flex-wrap:wrap;color:#5d6e66;line-height:1.5}
+.chart-wrap{height:230px}
+.chart-description{margin:8px 0 0;color:#596c62;font-size:11px;line-height:1.5}
+.chart-data-details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.chart-data-details>summary{min-height:44px;display:flex;align-items:center;color:var(--green);font-size:12px;font-weight:700;cursor:pointer}
+.chart-table-wrap{max-width:100%;overflow-x:auto}
+.chart-data-table{width:100%;border-collapse:collapse;font-size:11px;text-align:left}
+.chart-data-table caption{padding:5px 0;color:#5e7067;text-align:left}
+.chart-data-table th,.chart-data-table td{padding:9px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+.chart-data-table th{color:#465a50;font-weight:700}.chart-data-table td{color:#50645a;font-variant-numeric:tabular-nums}
+.home-recent-photo{margin-top:16px}
+.home-photo-preview{grid-template-columns:minmax(0,520px) minmax(0,1fr);align-items:start}
+.home-photo-preview>img{max-height:320px;object-fit:contain;object-position:left center}
+.home-photo-preview>.metric-foot{padding-top:8px}
+.secondary-button,.logout,button,select,input:not([type=checkbox]){min-height:44px;touch-action:manipulation}
+.stepper{grid-template-columns:44px minmax(0,1fr) 44px}
+.check-setting,.push-preferences label{min-height:44px}
+.timeline-marker{min-height:44px}
+.range-select select,.data-form input:not([type=checkbox]),.data-form select,.fermenter-form input:not([type=checkbox]),.fermenter-form select{min-height:44px}
+:focus-visible{outline:3px solid #236ab5;outline-offset:3px}
+.photo-item:focus-visible{outline-offset:2px}
+@media(max-width:760px){
+  .dashboard-status{margin:0 0 12px;padding:9px 10px;align-items:flex-start;flex-direction:column;gap:5px}
+  .metrics{grid-template-columns:minmax(0,1fr);gap:8px}
+  .metric-card,.metric-card.status-card{min-height:0;padding:13px 15px}
+  .metric-value{font-size:29px;margin-top:5px}
+  .camera-status{margin-top:9px}
+  .container .intro{flex-direction:column;align-items:stretch;margin-bottom:14px}
+  .intro h1{max-width:none}
+  .intro .muted{max-width:none}
+  .monitoring-controls{flex-direction:row;align-items:center;justify-content:space-between}
+  .monitoring-controls .secondary-button{max-width:none;white-space:normal}
+  .panel-heading{flex-wrap:wrap;align-items:flex-start}
+  .range-select{flex:1 1 100%}
+  .range-select select{width:100%;min-height:44px}
+  .chart-wrap{height:205px}
+  .chart-legend{gap:7px 13px;margin-top:12px}
+  .home-photo-preview{grid-template-columns:minmax(0,1fr);gap:8px}
+  .home-photo-preview>img{grid-column:1;max-height:260px;object-position:center}
+  .home-photo-preview>.metric-foot{grid-column:1;padding:0}
+  .home-device-grid{grid-template-columns:minmax(0,1fr)}
+  .home-device-grid article:last-child{grid-column:auto}
+  .secondary-button{white-space:normal;line-height:1.3}
+  footer{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+}
+@media(max-width:380px){
+  .topbar{gap:7px;padding-left:9px;padding-right:9px}
+  .brand{gap:6px;font-size:12px}
+  .brand-mark.logo{width:32px;height:32px}
+  .brand small.version{font-size:8px}
+  .logout{padding:6px 8px;font-size:10px;min-width:52px}
+  .app-shell{padding-left:10px;padding-right:10px}
+  .nav-item{font-size:8px;white-space:normal;line-height:1.1}
+  .nav-item>span:first-child{font-size:16px}
+  .panel{padding:15px 11px}
+  .chart-wrap{height:190px}
+}
 @media(max-width:760px){
   .topbar{position:sticky;top:0;z-index:20;height:calc(58px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 12px 0;}
   .brand{min-width:0;gap:8px;font-size:14px;white-space:nowrap}.brand-copy{min-width:0;overflow:hidden;text-overflow:ellipsis}.brand-mark.logo{width:36px;height:36px;flex:none}
@@ -155,3 +229,7 @@ html{min-height:100%}body{min-height:100vh;min-height:100dvh}
 .metrics{grid-template-columns:repeat(4,minmax(0,1fr))}.legend-dough{background:#557dce}.chart-legend{flex-wrap:wrap}
 #probe-form input[type="url"]{width:100%;min-width:0}#probe-config-status{overflow-wrap:anywhere}
 @media(max-width:700px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metrics .status-card{grid-column:auto}}
+
+/* Keep dashboard mobile overrides after the legacy probe layout rules above. */
+@media(max-width:760px){.metrics{grid-template-columns:minmax(0,1fr);gap:8px}.metrics .status-card{grid-column:auto}}
+.manual-editor-actions .secondary-button{min-height:44px}

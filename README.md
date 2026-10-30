@@ -1,4 +1,6 @@
-# Panettone Lab v0.12.0
+# Panettone Lab v0.12.1
+
+v0.12.1 fa més visibles l’hora i la vigència de les lectures, diferencia errors i captures antigues, clarifica les escales de temperatura/humitat amb una taula accessible, i ajusta el dashboard a pantalles estretes amb controls tàctils més grans. No canvia APIs, scheduler, autenticació, esquema SQLite, recollida ni dades existents. El redisseny no afegeix ni modifica ordres de control tèrmic. [Notes v0.12.1](docs/v0.12.1.md).
 
 v0.12.0 afegeix una sonda de massa ESP32 opcional: lectura HTTP autenticada independent del Shelly, registre SQLite separat, temperatura ambiental i de massa al mateix gràfic, activació des de Configuració i exportació CSV. [Configuració i proves](docs/v0.12.0.md).
 

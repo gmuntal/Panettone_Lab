@@ -13,6 +13,12 @@ let fermenterHistoryCache = {readings:[],actions:[]};
 let fermentationsCache = [];
 let readingsCache = [];
 let probeReadingsCache = [];
+let lastKnownProbeReading = null;
+let lastKnownReading = null;
+let lastKnownPhoto = null;
+let lastPhotoAttempt = null;
+let lastMonitoringState = null;
+let lastDashboardRefreshAt = null;
 let probeRefreshSequence = 0;
 let growthHistoryCache = [];
 let photoLibrary = [];
@@ -225,34 +231,59 @@ document.querySelector('#fermentation-sort')?.addEventListener('change',renderFe
 
 function drawChart(rows) {
   const canvas=$('chart'),box=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+  if(!box.width||!box.height)return;
   canvas.width=box.width*dpr;canvas.height=box.height*dpr;
   const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
-  const w=box.width,h=box.height,p={l:35,r:10,t:12,b:25};
+  const w=box.width,h=box.height,p={l:43,r:43,t:14,b:27};
   const ambient=rows.filter(row=>Number.isFinite(Date.parse(row.captured_at)));
   const dough=probeReadingsCache.filter(row=>Number.isFinite(Date.parse(row.captured_at)));
-  const all=[...ambient,...dough];
-  const t=all.filter(row=>row.sensor_ok&&Number.isFinite(row.temperature_c)).map(row=>row.temperature_c);
-  const hum=ambient.filter(row=>row.sensor_ok&&Number.isFinite(row.humidity_rh)).map(row=>row.humidity_rh);
-  $('chart-empty').style.display=t.length+hum.length?'none':'grid';if(!t.length&&!hum.length)return;
-  const bounds=(values,pad,fallback)=>values.length?[Math.floor(values.reduce((a,b)=>Math.min(a,b),Infinity)-pad),Math.ceil(values.reduce((a,b)=>Math.max(a,b),-Infinity)+pad)]:fallback;
-  const [tMin,tMax]=bounds(t,1,[15,35]),[hMin,hMax]=bounds(hum,5,[0,100]);
-  const first=all.reduce((a,row)=>Math.min(a,Date.parse(row.captured_at)),Infinity);
-  const last=all.reduce((a,row)=>Math.max(a,Date.parse(row.captured_at)),-Infinity);
+  const validRows=(data,key)=>data.filter(row=>row.sensor_ok&&Number.isFinite(Number(row[key]))&&row[key]!==null);
+  const ambientTemp=validRows(ambient,'temperature_c'),doughTemp=validRows(dough,'temperature_c'),humidity=validRows(ambient,'humidity_rh');
+  const temperatures=[...ambientTemp,...doughTemp].map(row=>Number(row.temperature_c));
+  const humidities=humidity.map(row=>Number(row.humidity_rh));
+  const all=[...ambientTemp,...doughTemp,...humidity].sort((a,b)=>Date.parse(a.captured_at)-Date.parse(b.captured_at));
+  const hasData=all.length>0;
+  $('chart-empty').textContent=(rows.length||dough.length)?'No hi ha cap valor vàlid de sensor en aquest període.':'Encara no hi ha lectures en aquest període.';
+  $('chart-empty').style.display=hasData?'none':'grid';
+  renderChartTable(ambientTemp,doughTemp,humidity);
+  if(!hasData)return;
+  const bounds=(values,pad,fallback)=>values.length?[Math.floor(Math.min(...values)-pad),Math.ceil(Math.max(...values)+pad)]:fallback;
+  const [tMin,tMax]=bounds(temperatures,1,[0,1]),[hMin,hMax]=bounds(humidities,5,[0,1]);
+  const first=Date.parse(all[0].captured_at),last=Date.parse(all.at(-1).captured_at);
   const plot=(value,min,max)=>max===min?.5:(value-min)/(max-min);
-  ctx.font='10px sans-serif';ctx.fillStyle='#9aa69f';ctx.strokeStyle='#edf0ed';ctx.lineWidth=1;
-  for(let i=0;i<4;i++){const y=p.t+(h-p.t-p.b)*i/3;ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();ctx.fillText((tMax-(tMax-tMin)*i/3).toFixed(0),0,y+3)}
+  ctx.font='10px sans-serif';ctx.fillStyle='#596c62';ctx.strokeStyle='#e8ece9';ctx.lineWidth=1;
+  for(let i=0;i<4;i++){
+    const y=p.t+(h-p.t-p.b)*i/3;
+    ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();
+    if(temperatures.length)ctx.fillText(`${(tMax-(tMax-tMin)*i/3).toFixed(1)}°`,0,y+3);
+    if(humidities.length)ctx.fillText(`${(hMax-(hMax-hMin)*i/3).toFixed(0)}%`,w-p.r+4,y+3);
+  }
+  if(!temperatures.length)ctx.fillText('Sense °C',0,p.t-4);
+  if(!humidities.length)ctx.fillText('Sense %',w-p.r+2,p.t-4);
   const series=(data,key,min,max,color)=>{
     ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineJoin='round';ctx.beginPath();let started=false,previous=null;
-    data.forEach(row=>{const value=row[key],time=Date.parse(row.captured_at);
-      if(!row.sensor_ok||!Number.isFinite(value)){started=false;previous=null;return;}
+    data.forEach(row=>{const value=Number(row[key]),time=Date.parse(row.captured_at);
+      if(!row.sensor_ok||row[key]===null||!Number.isFinite(value)){started=false;previous=null;return;}
       if(previous!==null&&time-previous>90000)started=false;
       const x=p.l+(w-p.l-p.r)*plot(time,first,last),y=p.t+(h-p.t-p.b)*(1-plot(value,min,max));
       if(!started){ctx.moveTo(x,y);started=true}else ctx.lineTo(x,y);previous=time;
     });ctx.stroke();
   };
-  series(ambient,'temperature_c',tMin,tMax,'#3e9375');series(dough,'temperature_c',tMin,tMax,'#557dce');series(ambient,'humidity_rh',hMin,hMax,'#d9954c');
-  ctx.fillStyle='#9aa69f';const label=time=>new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(time));
+  if(ambientTemp.length)series(ambient,'temperature_c',tMin,tMax,'#3e9375');
+  if(doughTemp.length)series(dough,'temperature_c',tMin,tMax,'#557dce');
+  if(humidity.length)series(ambient,'humidity_rh',hMin,hMax,'#d9954c');
+  ctx.fillStyle='#74837e';const label=time=>new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(time));
   ctx.fillText(label(first),p.l,h-4);ctx.fillText(label(last),Math.max(p.l,w-p.r-35),h-4);
+}
+
+function renderChartTable(ambientTemp,doughTemp,humidity){
+  const body=$('chart-data-body'),points=[];
+  for(const [label,rows,key,unit] of [['Ambient',ambientTemp,'temperature_c','°C'],['Massa',doughTemp,'temperature_c','°C'],['Humitat relativa',humidity,'humidity_rh','%']]){
+    rows.slice(-12).forEach(row=>points.push({label,time:row.captured_at,value:Number(row[key]),unit}));
+  }
+  points.sort((a,b)=>Date.parse(b.time)-Date.parse(a.time));body.replaceChildren();
+  if(!points.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=3;td.textContent='Encara no hi ha valors vàlids disponibles.';tr.append(td);body.append(tr);return;}
+  for(const point of points){const tr=document.createElement('tr');for(const value of [point.label,new Date(point.time).toLocaleString('ca-ES'),`${point.value.toLocaleString('ca-ES',{maximumFractionDigits:1})} ${point.unit}`]){const td=document.createElement('td');td.textContent=value;tr.append(td);}body.append(tr);}
 }
 
 const probeLabels={disabled:'Sonda desactivada',paused:'Seguiment aturat',waiting:'Esperant primera lectura',stale:'Lectura antiga',token_not_configured:'Falta configurar el token al servidor',timeout:'Sonda sense resposta',connection_failed:'Sense connexió amb la sonda',authentication_failed:'Token de sonda incorrecte',invalid_sensor_reading:'Lectura de sonda no vàlida',unexpected_sensor:'Sonda diferent de l’esperada',repeated_or_regressed_sample:'La sonda repeteix una mostra antiga'};
@@ -267,12 +298,17 @@ async function refreshProbe(){
     const [status,rows]=await Promise.all([json('/api/probe',{signal:controller.signal}),json(`/api/probe/readings?hours=${$('range').value}`,{signal:controller.signal})]);
     if(sequence!==probeRefreshSequence)return;
     probeReadingsCache=rows;
-    renderProbeTemperature(status.valid?status.temperature_c:null);
-    $('dough-temperature-status').textContent=status.valid?`Darrera lectura · ${fmtTime(status.last_attempt_at)}`:(probeLabels[status.state]||'Sonda no disponible');
+    const validProbe=[...rows].reverse().find(row=>row.sensor_ok&&row.temperature_c!==null&&Number.isFinite(Number(row.temperature_c)));
+    if(validProbe)lastKnownProbeReading=validProbe;
+    if(status.valid&&Number.isFinite(Number(status.temperature_c)))lastKnownProbeReading={temperature_c:Number(status.temperature_c),captured_at:status.last_attempt_at};
+    renderProbeTemperature(lastKnownProbeReading?.temperature_c??null);
+    $('dough-temperature-status').textContent=lastKnownProbeReading
+      ?`${status.valid?'Darrera lectura':'Darrera lectura vàlida'} · ${fmtTime(lastKnownProbeReading.captured_at)} · ${ageText(lastKnownProbeReading.captured_at)}${status.valid?'':` · ${probeLabels[status.state]||'sonda sense actualitzar'}`}`
+      :(probeLabels[status.state]||'Sonda no disponible');
     if(!$('probe-form').dataset.dirty){$('probe-enabled').checked=status.config.enabled;$('probe-url').value=status.config.url;}
     $('probe-config-status').textContent=status.config.token_configured?'Token de lectura configurat al servidor':'Cal configurar DOUGH_PROBE_TOKEN al servidor';
     drawChart(readingsCache);
-  }catch(error){if(sequence===probeRefreshSequence){renderProbeTemperature(null);$('dough-temperature-status').textContent='No s’ha pogut consultar la sonda';}}
+  }catch(error){if(sequence===probeRefreshSequence){renderProbeTemperature(lastKnownProbeReading?.temperature_c??null);$('dough-temperature-status').textContent=lastKnownProbeReading?`Darrera lectura vàlida · ${fmtTime(lastKnownProbeReading.captured_at)} · ${ageText(lastKnownProbeReading.captured_at)} · no s’ha pogut actualitzar`:'No s’ha pogut consultar la sonda';}}
   finally{clearTimeout(timeout);}
 }
 
@@ -411,6 +447,71 @@ function renderMonitoring(state) {
   button.classList.toggle('stop',state.active);
   const camera=$('camera-status');
   if(!state.active){camera.className='camera-status paused';camera.querySelector('span').textContent='Seguiment aturat';}
+}
+
+function ageText(timestamp){
+  const seconds=Math.floor((Date.now()-new Date(timestamp).getTime())/1000);
+  if(!Number.isFinite(seconds))return 'hora desconeguda';
+  if(seconds<0)return 'hora futura';
+  if(seconds<60)return 'ara';
+  if(seconds<3600)return `fa ${Math.floor(seconds/60)} min`;
+  if(seconds<86400)return `fa ${Math.floor(seconds/3600)} h`;
+  return `fa ${Math.floor(seconds/86400)} dies`;
+}
+function setMetricValue(id,value,unit){
+  const metric=$(id),small=document.createElement('small');small.textContent=unit;
+  const number=Number.isFinite(Number(value))&&value!==null?Number(value).toLocaleString('ca-ES',{minimumFractionDigits:1,maximumFractionDigits:1}):'—';
+  metric.replaceChildren(document.createTextNode(number),small);
+}
+function renderReadingFreshness(reading,latestAttempt=null){
+  const badge=$('sensor-freshness');
+  if(!reading){
+    const attempted=latestAttempt&&latestAttempt.captured_at;
+    if(attempted&&!latestAttempt.sensor_ok){badge.className='data-freshness stale';badge.querySelector('span').textContent='Sensor · darrer intent fallit';$('temperature-time').textContent=`Intent de lectura fallit · ${fmtTime(latestAttempt.captured_at)}`;$('humidity-time').textContent=`Intent de lectura fallit · ${fmtTime(latestAttempt.captured_at)}`;}
+    else if(attempted){badge.className='data-freshness unknown';badge.querySelector('span').textContent='Sensor · sense valors vàlids';$('temperature-time').textContent=`La mostra no inclou una temperatura vàlida · ${fmtTime(latestAttempt.captured_at)}`;$('humidity-time').textContent=`La mostra no inclou una humitat vàlida · ${fmtTime(latestAttempt.captured_at)}`;}
+    else{badge.className='data-freshness unknown';badge.querySelector('span').textContent='Sensor · sense lectures';$('temperature-time').textContent='No hi ha cap lectura vàlida registrada.';$('humidity-time').textContent='No hi ha cap lectura vàlida registrada.';}
+    return;
+  }
+  const ageSeconds=Math.max(0,(Date.now()-new Date(reading.captured_at).getTime())/1000);
+  const limit=Math.max(60,Number(badge.dataset.intervalSeconds||30)*2);
+  const recent=Number.isFinite(ageSeconds)&&ageSeconds<=limit;
+  badge.className=`data-freshness ${recent?'fresh':'stale'}`;
+  badge.querySelector('span').textContent=`Sensor · dada ${recent?'recent':'antiga'} · ${ageText(reading.captured_at)}`;
+  const attemptTime=Date.parse(latestAttempt?.captured_at||'');
+  const validTime=Date.parse(reading.captured_at||'');
+  const failedNewer=latestAttempt&& !latestAttempt.sensor_ok&&Number.isFinite(attemptTime)&&attemptTime>validTime;
+  const detail=`${fmtTime(reading.captured_at)} · ${ageText(reading.captured_at)}`;
+  const freshness=failedNewer?' · l’últim intent ha fallat':recent?'':' · no actualitzada';
+  $('temperature-time').textContent=reading.temperature_c!==null&&Number.isFinite(Number(reading.temperature_c))
+    ?`Temperatura vàlida · ${detail}${freshness}`:`Sense valor de temperatura · mostra ${detail}${freshness}`;
+  $('humidity-time').textContent=reading.humidity_rh!==null&&Number.isFinite(Number(reading.humidity_rh))
+    ?`Humitat vàlida · ${detail}${freshness}`:`Sense valor d’humitat · mostra ${detail}${freshness}`;
+}
+function renderCurrentReadings(readings,stateReading){
+  const latestValid=[...readings].reverse().find(row=>row.sensor_ok&&(
+    (row.temperature_c!==null&&Number.isFinite(Number(row.temperature_c)))||
+    (row.humidity_rh!==null&&Number.isFinite(Number(row.humidity_rh)))
+  ));
+  if(latestValid)lastKnownReading=latestValid;
+  const shown=lastKnownReading;
+  setMetricValue('temperature',shown?.temperature_c,'°C');
+  setMetricValue('humidity',shown?.humidity_rh,'%');
+  renderReadingFreshness(shown,stateReading||readings.at(-1));
+}
+function renderCameraFreshness(photo,monitoring){
+  const camera=$('camera-status'),label=camera.querySelector('span');
+  if(!photo){
+    if(lastPhotoAttempt&&!lastPhotoAttempt.camera_ok){camera.className='camera-status bad';label.textContent='Darrera prova de càmera fallida';$('photo-time').textContent=`Últim intent · ${fmtTime(lastPhotoAttempt.captured_at)} · ${ageText(lastPhotoAttempt.captured_at)}`;return;}
+    camera.className='camera-status unknown';label.textContent=monitoring.active?'Encara no hi ha captures':'Encara no hi ha cap registre';$('photo-time').textContent='L’hora de captura apareixerà aquí.';return;
+  }
+  const pausedInSession=activeFermentation&&!activeFermentation.camera_enabled;
+  if(lastPhotoAttempt&&!lastPhotoAttempt.camera_ok){camera.className='camera-status bad';label.textContent='Darrera prova de càmera fallida';$('photo-time').textContent=`Últim intent · ${fmtTime(lastPhotoAttempt.captured_at)} · ${ageText(lastPhotoAttempt.captured_at)} · última imatge vàlida ${fmtTime(photo.captured_at)}`;return;}
+  const ageSeconds=Math.max(0,(Date.now()-new Date(photo.captured_at).getTime())/1000);
+  const limit=Math.max(120,Number(camera.dataset.intervalSeconds||120)*2);
+  const recent=Number.isFinite(ageSeconds)&&ageSeconds<=limit;
+  if(!monitoring.active||pausedInSession){camera.className='camera-status paused';label.textContent=pausedInSession?'Pausada en aquesta fermentació':'Seguiment aturat';}
+  else{camera.className=`camera-status ${recent?'ok':'stale'}`;label.textContent=recent?'Darrera captura recent':'Darrera captura antiga';}
+  $('photo-time').textContent=`Captura vàlida · ${fmtTime(photo.captured_at)} · ${ageText(photo.captured_at)}${recent?'':' · no actualitzada'}`;
 }
 
 $('monitoring-button').addEventListener('click',async()=>{const button=$('monitoring-button');button.disabled=true;try{const result=await json('/api/monitoring',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:!button.classList.contains('stop')})});renderMonitoring(result);await refresh();}catch(error){window.alert(error.message);}finally{button.disabled=false;}});
@@ -664,16 +765,26 @@ async function refresh() {
     renderMonitoring(monitoring);
     renderFermenter(fermenter,fermenterHistoryData);
     const reading=state.reading;
-    if(reading&&reading.sensor_ok){$('temperature').innerHTML=`${Number(reading.temperature_c).toFixed(1)}<small>°C</small>`;$('humidity').innerHTML=`${Number(reading.humidity_rh).toFixed(1)}<small>%</small>`;$('temperature-time').textContent=`Darrera lectura · ${fmtTime(reading.captured_at)}`;$('humidity-time').textContent='Relativa de l’ambient';}
-    else if(reading){$('temperature-time').textContent='No s’ha pogut llegir el Shelly';$('humidity-time').textContent=`Darrera prova · ${fmtTime(reading.captured_at)}`;}
+    renderCurrentReadings(readings,reading);
     const photo=state.photo,camera=$('camera-status');
-    if(photo){$('photo-time').textContent=`Darrera captura · ${fmtTime(photo.captured_at)}`;const cameraPaused=activeFermentation&& !activeFermentation.camera_enabled;camera.className=monitoring.active&&!cameraPaused?`camera-status ${photo.camera_ok?'ok':'bad'}`:'camera-status paused';camera.querySelector('span').textContent=cameraPaused?'Pausada en aquesta fermentació':monitoring.active?(photo.camera_ok?'Connectada':'Sense connexió'):'Seguiment aturat';}
+    lastPhotoAttempt=photo||lastPhotoAttempt;
+    if(photo?.camera_ok&&photo.filename)lastKnownPhoto=photo;
+    renderCameraFreshness(lastKnownPhoto,monitoring);
     const latestImage=$('home-camera-image');
-    if(photo?.camera_ok&&photo.filename){latestImage.src=`/photos/${encodeURIComponent(photo.filename)}`;latestImage.hidden=false;$('home-camera-time').textContent=`Captura ${new Date(photo.captured_at).toLocaleString('ca-ES')}`;}
-    else{latestImage.removeAttribute('src');latestImage.hidden=true;$('home-camera-time').textContent=photo?`Darrera prova de càmera ${fmtTime(photo.captured_at)} · sense imatge vàlida`:'Encara no hi ha cap fotografia disponible.';}
-    drawChart(readings);if(location.hash==='#camera')void refreshCamera();
+    if(lastKnownPhoto?.camera_ok&&lastKnownPhoto.filename){latestImage.src=`/photos/${encodeURIComponent(lastKnownPhoto.filename)}`;latestImage.hidden=false;$('home-camera-time').textContent=`Captura ${new Date(lastKnownPhoto.captured_at).toLocaleString('ca-ES')} · ${ageText(lastKnownPhoto.captured_at)}${lastPhotoAttempt&&!lastPhotoAttempt.camera_ok?` · l’últim intent ha fallat (${fmtTime(lastPhotoAttempt.captured_at)})`:''}`;}
+    else{latestImage.removeAttribute('src');latestImage.hidden=true;$('home-camera-time').textContent=lastPhotoAttempt?`L’últim intent de captura no ha produït una imatge vàlida · ${fmtTime(lastPhotoAttempt.captured_at)}`:'Encara no hi ha cap fotografia disponible.';}
+    drawChart(readings);
+    lastDashboardRefreshAt=new Date();$('dashboard-refresh').textContent=`Consulta completada · ${lastDashboardRefreshAt.toLocaleTimeString('ca-ES',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`;$('dashboard-feedback').hidden=true;
+    if(location.hash==='#camera')void refreshCamera();
+    lastMonitoringState=monitoring;
     renderFermentations();
-  }catch(error){if(error.message!=='Sessió caducada')console.warn('No s’ha pogut actualitzar el dashboard',error);}
+  }catch(error){if(error.message!=='Sessió caducada'){
+    console.warn('No s’ha pogut actualitzar el dashboard',error);
+    $('dashboard-feedback').textContent=`No s’ha pogut actualitzar el dashboard. Es mantenen les últimes dades carregades${lastDashboardRefreshAt?` (${lastDashboardRefreshAt.toLocaleTimeString('ca-ES',{hour:'2-digit',minute:'2-digit'})})`:''}.`;
+    $('dashboard-feedback').hidden=false;
+    if(lastKnownReading)renderReadingFreshness(lastKnownReading);
+    if(lastKnownPhoto)renderCameraFreshness(lastKnownPhoto,lastMonitoringState||{active:false});
+  }}
 }
 
 $('photo-select').addEventListener('change',event=>selectPhoto(event.currentTarget.value));
@@ -756,4 +867,4 @@ $('probe-form').addEventListener('submit',async event=>{
 });
 showPage(location.hash.slice(1),false);refresh();setInterval(refresh,30000);
 setInterval(refreshFermenterOnly,5000);
-if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.12.0',{updateViaCache:'none'}).catch(()=>{});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.12.1',{updateViaCache:'none'}).catch(()=>{});
