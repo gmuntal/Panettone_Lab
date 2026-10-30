@@ -30,6 +30,31 @@ def init_db() -> None:
             error TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_readings_captured ON readings(captured_at);
+        CREATE TABLE IF NOT EXISTS dough_probe_settings (
+            id INTEGER PRIMARY KEY CHECK(id=1),
+            enabled INTEGER NOT NULL DEFAULT 0,
+            url TEXT NOT NULL,
+            revision INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS dough_probe_readings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            captured_at TEXT NOT NULL,
+            temperature_c REAL,
+            raw_temperature_c REAL,
+            offset_c REAL,
+            sensor_ok INTEGER NOT NULL DEFAULT 0,
+            error TEXT,
+            device_id TEXT,
+            sensor_rom TEXT,
+            boot_id TEXT,
+            sample_sequence INTEGER,
+            sample_age_ms REAL,
+            rssi_dbm INTEGER,
+            config_revision INTEGER NOT NULL,
+            fermentation_id INTEGER REFERENCES fermentations(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dough_probe_time ON dough_probe_readings(captured_at,id);
+        CREATE INDEX IF NOT EXISTS idx_dough_probe_fermentation ON dough_probe_readings(fermentation_id,captured_at);
         CREATE TABLE IF NOT EXISTS photos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             captured_at TEXT NOT NULL,
@@ -205,6 +230,8 @@ def init_db() -> None:
                 db.execute(f"ALTER TABLE fermenter_runtime ADD COLUMN {name} {declaration}")
         db.execute("INSERT OR IGNORE INTO monitoring_control(id,active,changed_at) VALUES(1,0,?)",
                    (utc_now(),))
+        db.execute("INSERT OR IGNORE INTO dough_probe_settings(id,enabled,url) VALUES(1,?,?)",
+                   (int(settings.dough_probe_enabled), settings.dough_probe_url))
         db.execute("INSERT OR IGNORE INTO fermenter_settings(id,updated_at) VALUES(1,?)", (utc_now(),))
         db.execute("INSERT OR IGNORE INTO fermenter_runtime(id) VALUES(1)")
         db.execute("INSERT OR IGNORE INTO push_preferences(id,updated_at) VALUES(1,?)", (utc_now(),))

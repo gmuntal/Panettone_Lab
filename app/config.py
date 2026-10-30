@@ -28,6 +28,10 @@ class Settings:
     camera_username: str = os.getenv("CAMERA_USERNAME", "")
     camera_password: str = os.getenv("CAMERA_PASSWORD", "")
     sensor_interval_seconds: int = int(os.getenv("SENSOR_INTERVAL_SECONDS", "30"))
+    dough_probe_enabled: bool = os.getenv("DOUGH_PROBE_ENABLED", "false").lower() == "true"
+    dough_probe_url: str = os.getenv("DOUGH_PROBE_URL", "http://10.85.3.103/api/status")
+    dough_probe_token: str = os.getenv("DOUGH_PROBE_TOKEN", "")
+    dough_probe_interval_seconds: int = int(os.getenv("DOUGH_PROBE_INTERVAL_SECONDS", "30"))
     photo_interval_seconds: int = int(os.getenv("PHOTO_INTERVAL_SECONDS", "120"))
     webpush_vapid_public_key: str = os.getenv("WEBPUSH_VAPID_PUBLIC_KEY", "")
     webpush_vapid_private_key: str = os.getenv("WEBPUSH_VAPID_PRIVATE_KEY", "")
@@ -46,6 +50,8 @@ def validate_settings() -> None:
         raise RuntimeError("READONLY_API_TOKEN must have at least 32 characters when configured")
     if settings.sensor_interval_seconds < 5 or settings.photo_interval_seconds < 30:
         raise RuntimeError("Polling intervals are too short")
+    if not 5 <= settings.dough_probe_interval_seconds <= 300:
+        raise RuntimeError("DOUGH_PROBE_INTERVAL_SECONDS must be 5–300")
     if settings.shelly_output_id != 0:
         raise RuntimeError("Only the user-confirmed Shelly output 0 is supported for the heater")
     if settings.shelly_watchdog_seconds < 10 or settings.shelly_watchdog_seconds > 60:

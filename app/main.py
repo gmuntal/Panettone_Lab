@@ -31,8 +31,9 @@ from .fermenter import (get_state as get_fermenter_state, history as fermenter_h
 from .resources import resource_snapshot
 from . import push
 from . import archiving
+from . import probe
 
-APP_VERSION = "0.11.2"
+APP_VERSION = "0.12.0"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -55,6 +56,8 @@ def create_app(start_background=False):
                      request.method, request.path, response.status_code, request.remote_addr or "unknown")
             response.headers["Cache-Control"] = "no-store"
         if request.path == "/api/growth/sequence":
+            response.headers["Cache-Control"] = "no-store"
+        if request.path.startswith("/api/probe"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -315,6 +318,32 @@ def create_app(start_background=False):
         except ValueError:
             abort(400)
         return jsonify(recent_readings(hours))
+
+    @app.get("/api/probe")
+    @login_required
+    def probe_status():
+        response = jsonify(probe.status())
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.post("/api/probe")
+    @login_required
+    def probe_config():
+        try:
+            return jsonify(probe.update_config(request.get_json(silent=True)))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    @app.get("/api/probe/readings")
+    @login_required
+    def probe_readings():
+        try:
+            hours = int(request.args.get("hours", "24"))
+            if not 1 <= hours <= 720:
+                raise ValueError()
+        except ValueError:
+            return jsonify({"error": "hours ha de ser entre 1 i 720"}), 400
+        return jsonify(probe.readings(hours, fermentation_filter()))
 
     @app.get("/api/photos")
     @login_required
@@ -652,7 +681,7 @@ def create_app(start_background=False):
         try:
             session_id = active_fermentation_id(db)
             counts = {name: db.execute(f"SELECT count(*) FROM {name} WHERE fermentation_id=?", (session_id,)).fetchone()[0]
-                      if session_id is not None else 0 for name in ("readings", "photos", "events")}
+                      if session_id is not None else 0 for name in ("readings", "photos", "events", "dough_probe_readings")}
         finally:
             db.close()
         control = read_rows("SELECT active,changed_at FROM monitoring_control WHERE id=1", ())
@@ -661,7 +690,7 @@ def create_app(start_background=False):
         return jsonify({"application_version": APP_VERSION, "monitoring": {"active": bool(control[0]["active"]), "changed_at": control[0]["changed_at"]} if control else {"active": False, "changed_at": None},
                         "capture_intervals_seconds": {"readings": settings.sensor_interval_seconds,
                                                        "photos": settings.photo_interval_seconds},
-                        "latest": latest, "active_fermentation_id": session_id,
+                        "latest": latest, "dough_probe": probe.status(), "active_fermentation_id": session_id,
                         "active_fermentation_counts": counts})
 
     @app.get("/api/v1/readings")
@@ -674,6 +703,19 @@ def create_app(start_background=False):
             clause += " AND" if clause else " WHERE"
             clause += " fermentation_id=?"; params.append(fermentation_id)
         rows = read_rows(f"SELECT * FROM readings{clause} ORDER BY captured_at,id LIMIT ? OFFSET ?", params + [limit + 1, offset])
+        return jsonify(paginated(rows, limit, offset))
+
+    @app.get("/api/v1/probe/readings")
+    @readonly_api_required
+    def v1_probe_readings():
+        start, end = query_range(); limit, offset = page_params()
+        clause, params = add_range_clauses("captured_at", start, end)
+        fermentation_id = fermentation_filter()
+        if fermentation_id is not None:
+            clause += " AND" if clause else " WHERE"
+            clause += " fermentation_id=?"; params.append(fermentation_id)
+        rows = read_rows(f"SELECT * FROM dough_probe_readings{clause} ORDER BY captured_at,id LIMIT ? OFFSET ?",
+                         params + [limit + 1, offset])
         return jsonify(paginated(rows, limit, offset))
 
     @app.get("/api/v1/photos")
@@ -751,6 +793,7 @@ def create_app(start_background=False):
             abort(404)
         result = rows[0]
         result["counts"] = {"readings": read_rows("SELECT count(*) AS n FROM readings WHERE fermentation_id=?", (fermentation_id,))[0]["n"],
+                             "dough_probe_readings": read_rows("SELECT count(*) AS n FROM dough_probe_readings WHERE fermentation_id=?", (fermentation_id,))[0]["n"],
                              "photos": read_rows("SELECT count(*) AS n FROM photos WHERE fermentation_id=?", (fermentation_id,))[0]["n"],
                              "events": read_rows("SELECT count(*) AS n FROM events WHERE fermentation_id=?", (fermentation_id,))[0]["n"]}
         result["events"] = read_rows("SELECT * FROM events WHERE fermentation_id=? ORDER BY occurred_at,id", (fermentation_id,))

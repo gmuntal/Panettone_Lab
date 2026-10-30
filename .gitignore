@@ -9,3 +9,6 @@ exports/
 *.db
 *.db-shm
 *.db-wal
+firmware/PanettoneProbe/config.h
+SensorTemp1wire_MQTT_display_webserver.ino
+backups/esp32-*.bin

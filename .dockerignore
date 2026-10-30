@@ -9,3 +9,7 @@ data/
 tests/
 README.md
 docs/
+firmware/
+*.ino
+exports/
+backups/

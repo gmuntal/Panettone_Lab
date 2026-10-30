@@ -12,6 +12,8 @@ let activeFermentation = null;
 let fermenterHistoryCache = {readings:[],actions:[]};
 let fermentationsCache = [];
 let readingsCache = [];
+let probeReadingsCache = [];
+let probeRefreshSequence = 0;
 let growthHistoryCache = [];
 let photoLibrary = [];
 let allPhotos = [];
@@ -226,18 +228,52 @@ function drawChart(rows) {
   canvas.width=box.width*dpr;canvas.height=box.height*dpr;
   const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
   const w=box.width,h=box.height,p={l:35,r:10,t:12,b:25};
-  const valid=rows.filter(x=>x.temperature_c!==null||x.humidity_rh!==null);
-  $('chart-empty').style.display=valid.length?'none':'grid';if(!valid.length)return;
-  const t=valid.map(x=>x.temperature_c).filter(Number.isFinite),hum=valid.map(x=>x.humidity_rh).filter(Number.isFinite);
-  const tMin=Math.floor(Math.min(...t)-1),tMax=Math.ceil(Math.max(...t)+1),hMin=Math.floor(Math.min(...hum)-5),hMax=Math.ceil(Math.max(...hum)+5);
+  const ambient=rows.filter(row=>Number.isFinite(Date.parse(row.captured_at)));
+  const dough=probeReadingsCache.filter(row=>Number.isFinite(Date.parse(row.captured_at)));
+  const all=[...ambient,...dough];
+  const t=all.filter(row=>row.sensor_ok&&Number.isFinite(row.temperature_c)).map(row=>row.temperature_c);
+  const hum=ambient.filter(row=>row.sensor_ok&&Number.isFinite(row.humidity_rh)).map(row=>row.humidity_rh);
+  $('chart-empty').style.display=t.length+hum.length?'none':'grid';if(!t.length&&!hum.length)return;
+  const bounds=(values,pad,fallback)=>values.length?[Math.floor(values.reduce((a,b)=>Math.min(a,b),Infinity)-pad),Math.ceil(values.reduce((a,b)=>Math.max(a,b),-Infinity)+pad)]:fallback;
+  const [tMin,tMax]=bounds(t,1,[15,35]),[hMin,hMax]=bounds(hum,5,[0,100]);
+  const first=all.reduce((a,row)=>Math.min(a,Date.parse(row.captured_at)),Infinity);
+  const last=all.reduce((a,row)=>Math.max(a,Date.parse(row.captured_at)),-Infinity);
   const plot=(value,min,max)=>max===min?.5:(value-min)/(max-min);
   ctx.font='10px sans-serif';ctx.fillStyle='#9aa69f';ctx.strokeStyle='#edf0ed';ctx.lineWidth=1;
   for(let i=0;i<4;i++){const y=p.t+(h-p.t-p.b)*i/3;ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();ctx.fillText((tMax-(tMax-tMin)*i/3).toFixed(0),0,y+3)}
-  const series=(key,min,max,color)=>{ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineJoin='round';ctx.beginPath();let started=false;valid.forEach((row,i)=>{const value=row[key];if(value===null||!Number.isFinite(value))return;const x=p.l+(w-p.l-p.r)*i/Math.max(1,valid.length-1),y=p.t+(h-p.t-p.b)*(1-plot(value,min,max));if(!started){ctx.moveTo(x,y);started=true}else ctx.lineTo(x,y)});ctx.stroke()};
-  series('temperature_c',tMin,tMax,'#3e9375');series('humidity_rh',hMin,hMax,'#d9954c');
-  const first=new Date(valid[0].captured_at),last=new Date(valid.at(-1).captured_at);ctx.fillStyle='#9aa69f';
-  ctx.fillText(new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(first),p.l,h-4);
-  ctx.fillText(new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(last),Math.max(p.l,w-p.r-35),h-4);
+  const series=(data,key,min,max,color)=>{
+    ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineJoin='round';ctx.beginPath();let started=false,previous=null;
+    data.forEach(row=>{const value=row[key],time=Date.parse(row.captured_at);
+      if(!row.sensor_ok||!Number.isFinite(value)){started=false;previous=null;return;}
+      if(previous!==null&&time-previous>90000)started=false;
+      const x=p.l+(w-p.l-p.r)*plot(time,first,last),y=p.t+(h-p.t-p.b)*(1-plot(value,min,max));
+      if(!started){ctx.moveTo(x,y);started=true}else ctx.lineTo(x,y);previous=time;
+    });ctx.stroke();
+  };
+  series(ambient,'temperature_c',tMin,tMax,'#3e9375');series(dough,'temperature_c',tMin,tMax,'#557dce');series(ambient,'humidity_rh',hMin,hMax,'#d9954c');
+  ctx.fillStyle='#9aa69f';const label=time=>new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(time));
+  ctx.fillText(label(first),p.l,h-4);ctx.fillText(label(last),Math.max(p.l,w-p.r-35),h-4);
+}
+
+const probeLabels={disabled:'Sonda desactivada',paused:'Seguiment aturat',waiting:'Esperant primera lectura',stale:'Lectura antiga',token_not_configured:'Falta configurar el token al servidor',timeout:'Sonda sense resposta',connection_failed:'Sense connexió amb la sonda',authentication_failed:'Token de sonda incorrecte',invalid_sensor_reading:'Lectura de sonda no vàlida',unexpected_sensor:'Sonda diferent de l’esperada',repeated_or_regressed_sample:'La sonda repeteix una mostra antiga'};
+function renderProbeTemperature(value){
+  const metric=$('dough-temperature'),unit=document.createElement('small');unit.textContent='°C';
+  metric.replaceChildren(document.createTextNode(Number.isFinite(value)?value.toFixed(1):'—'),unit);
+}
+async function refreshProbe(){
+  const sequence=++probeRefreshSequence;
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),8000);
+  try{
+    const [status,rows]=await Promise.all([json('/api/probe',{signal:controller.signal}),json(`/api/probe/readings?hours=${$('range').value}`,{signal:controller.signal})]);
+    if(sequence!==probeRefreshSequence)return;
+    probeReadingsCache=rows;
+    renderProbeTemperature(status.valid?status.temperature_c:null);
+    $('dough-temperature-status').textContent=status.valid?`Darrera lectura · ${fmtTime(status.last_attempt_at)}`:(probeLabels[status.state]||'Sonda no disponible');
+    if(!$('probe-form').dataset.dirty){$('probe-enabled').checked=status.config.enabled;$('probe-url').value=status.config.url;}
+    $('probe-config-status').textContent=status.config.token_configured?'Token de lectura configurat al servidor':'Cal configurar DOUGH_PROBE_TOKEN al servidor';
+    drawChart(readingsCache);
+  }catch(error){if(sequence===probeRefreshSequence){renderProbeTemperature(null);$('dough-temperature-status').textContent='No s’ha pogut consultar la sonda';}}
+  finally{clearTimeout(timeout);}
 }
 
 function drawGrowthChart(rows) {
@@ -613,6 +649,7 @@ function renderCameraFermentations(){
 }
 
 async function refresh() {
+  void refreshProbe();
   const requestSequence=++refreshSequence;
   const previousActiveId=activeFermentation?.id??null;
   try {
@@ -710,6 +747,13 @@ $('photo-sampling').addEventListener('change',()=>renderPhotoLibrary(allPhotos))
 $('timelapse-speed').addEventListener('change',()=>{if(timelapseTimer){stopPlayback();playTimelapse();}});
 let timer;
 window.addEventListener('resize',()=>{clearTimeout(timer);timer=setTimeout(refresh,200)});
+$('probe-form').addEventListener('input',()=>{$('probe-form').dataset.dirty='1';});
+$('probe-form').addEventListener('submit',async event=>{
+  event.preventDefault();const button=event.currentTarget.querySelector('button');button.disabled=true;
+  try{await json('/api/probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('probe-enabled').checked,url:$('probe-url').value})});delete $('probe-form').dataset.dirty;await refreshProbe();}
+  catch(error){$('probe-config-status').textContent=error.message;}
+  finally{button.disabled=false;}
+});
 showPage(location.hash.slice(1),false);refresh();setInterval(refresh,30000);
 setInterval(refreshFermenterOnly,5000);
-if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.11.2',{updateViaCache:'none'}).catch(()=>{});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.12.0',{updateViaCache:'none'}).catch(()=>{});

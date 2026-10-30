@@ -10,6 +10,20 @@ servers:
 security:
   - ReadOnlyBearer: []
 paths:
+  /api/v1/probe/readings:
+    get:
+      summary: Lectures de temperatura de massa, independents de les ambientals
+      parameters:
+        - {$ref: '#/components/parameters/start'}
+        - {$ref: '#/components/parameters/end'}
+        - {$ref: '#/components/parameters/limit'}
+        - {$ref: '#/components/parameters/offset'}
+        - name: fermentation_id
+          in: query
+          schema: {type: integer}
+      responses:
+        '200': {description: Lectures paginades amb qualitat, errors i identificació de sonda}
+        '401': {description: Credencial de només lectura absent o incorrecta}
   /api/v1/status:
     get:
       summary: Estat de l'aplicació, monitoratge i darrera lectura/captura

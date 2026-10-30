@@ -130,6 +130,9 @@ def build_session_zip(database_path: str, photo_dir: str, start: str, end: str,
                 "SELECT * FROM photos WHERE captured_at >= ? AND captured_at < ? ORDER BY captured_at, id",
                 (start_utc, end_utc))]
             tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            probe_readings = [dict(row) for row in db.execute(
+                "SELECT * FROM dough_probe_readings WHERE captured_at >= ? AND captured_at < ? ORDER BY captured_at,id",
+                (start_utc, end_utc))] if "dough_probe_readings" in tables else []
             events = []
             if "events" in tables:
                 columns = {row[1] for row in db.execute("PRAGMA table_info(events)")}
@@ -200,9 +203,11 @@ def build_session_zip(database_path: str, photo_dir: str, start: str, end: str,
             "units": {"temperature": "°C", "relative_humidity": "%"},
             "expected_sampling_seconds": {"readings": sensor_interval_seconds, "photos": photo_interval_seconds},
             "counts": {"reading_records": len(readings), "reading_errors": sum(not bool(r.get("sensor_ok")) for r in readings),
+                       "dough_probe_records": len(probe_readings),
+                       "dough_probe_errors": sum(not bool(r.get("sensor_ok")) for r in probe_readings),
                        "photo_records": len(photos), "photo_errors": sum(not bool(r.get("camera_ok")) for r in photos),
                        "photo_files_exported": len(exported_paths), "events": len(events)},
-            "fermentation_ids_in_window": sorted({str(row.get("fermentation_id")) for row in readings + photos + events
+            "fermentation_ids_in_window": sorted({str(row.get("fermentation_id")) for row in readings + photos + events + probe_readings
                                                    if row.get("fermentation_id") is not None}),
             "timestamp_alignment": {"filename_time_basis": timezone_name,
                                     "filename_to_database_abs_delta_seconds_max": max(timestamp_checks) if timestamp_checks else None,
@@ -219,6 +224,12 @@ def build_session_zip(database_path: str, photo_dir: str, start: str, end: str,
         with zipfile.ZipFile(archive_stream, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
             _write_csv(archive, "readings.csv",
                        ["timestamp", "temperature_c", "humidity_rh", "sensor_id", "quality", "error", "fermentation_id"], reading_rows)
+            if "dough_probe_readings" in tables:
+                probe_header = ["captured_at", "temperature_c", "raw_temperature_c", "offset_c", "sensor_ok",
+                                "error", "device_id", "sensor_rom", "boot_id", "sample_sequence",
+                                "sample_age_ms", "rssi_dbm", "fermentation_id"]
+                _write_csv(archive, "dough_temperature.csv", probe_header,
+                           [[row.get(key, "") for key in probe_header] for row in probe_readings])
             _write_csv(archive, "photos.csv",
                        ["timestamp", "filename", "path", "session_id", "camera_id", "fermentation_id", "capture_status", "error"], photo_rows)
             _write_csv(archive, "events.csv", event_header, event_rows)

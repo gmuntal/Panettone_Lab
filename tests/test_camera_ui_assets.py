@@ -63,8 +63,9 @@ class CameraUiAssetTests(unittest.TestCase):
         self.assertIn(".camera-nav{display:grid;grid-template-columns:1fr 1fr}", css)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
-    def test_camera_state_regressions_in_node(self):
-        subprocess.run(["node", "--test", str(ROOT / "tests/camera_state.test.js")],
+    def test_frontend_regressions_in_node(self):
+        subprocess.run(["node", "--test", str(ROOT / "tests/camera_state.test.js"),
+                        str(ROOT / "tests/probe-chart.test.js")],
                        check=True, cwd=ROOT, capture_output=True, text=True)
 
 

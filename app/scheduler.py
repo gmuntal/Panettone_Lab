@@ -87,6 +87,8 @@ def start_workers():
     from .push import worker as push_worker
     threading.Thread(target=push_worker, args=(stop,), name="web-push-delivery", daemon=True).start()
     threading.Thread(target=resource_alert_loop, args=(stop,), name="resource-monitor", daemon=True).start()
+    from .probe import worker as probe_worker
+    threading.Thread(target=probe_worker, args=(stop,), name="dough-probe-poller", daemon=True).start()
     return stop
 
 

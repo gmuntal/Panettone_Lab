@@ -114,7 +114,7 @@
 
 .camera-frame img[hidden]{display:none}#camera-load-status{min-height:1.4em;margin:8px 0}
 
-/* v0.11.2: the camera overlays are clipped to their own photo coordinate space. */
+/* v0.12.0: the camera overlays are clipped to their own photo coordinate space. */
 html{min-height:100%}body{min-height:100vh;min-height:100dvh}
 .camera-frame{position:relative;isolation:isolate;contain:paint;overflow:hidden;overflow:clip}
 .calibration-overlay{position:absolute;inset:0;z-index:1;overflow:hidden;clip-path:inset(0);}
@@ -150,3 +150,8 @@ html{min-height:100%}body{min-height:100vh;min-height:100dvh}
   .app-shell{padding-inline:8px}.panel{padding:14px 10px}.nav-item{font-size:8px}.nav-item>span:first-child{font-size:15px}
   .camera-viewer-panel .panel-heading h2{font-size:15px}.manual-editor-actions{display:grid;grid-template-columns:1fr 1fr}.manual-editor-actions #manual-correction-delete{grid-column:1/-1}
 }
+
+/* Optional dough probe */
+.metrics{grid-template-columns:repeat(4,minmax(0,1fr))}.legend-dough{background:#557dce}.chart-legend{flex-wrap:wrap}
+#probe-form input[type="url"]{width:100%;min-width:0}#probe-config-status{overflow-wrap:anywhere}
+@media(max-width:700px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metrics .status-card{grid-column:auto}}

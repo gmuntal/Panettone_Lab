@@ -1,4 +1,6 @@
-# Panettone Lab v0.11.2
+# Panettone Lab v0.12.0
+
+v0.12.0 afegeix una sonda de massa ESP32 opcional: lectura HTTP autenticada independent del Shelly, registre SQLite separat, temperatura ambiental i de massa al mateix gràfic, activació des de Configuració i exportació CSV. [Configuració i proves](docs/v0.12.0.md).
 
 v0.11.2 millora la revisió del creixement: permet corregir manualment la superfície amb auditoria separada, explica les deteccions automàtiques dubtoses, simplifica el calibratge, retalla les superposicions a cada fotografia i afegeix marcadors a la cronologia. La vista mòbil dona més espai a la càmera i respecta les zones segures de la pantalla. La detecció de moviment i la validació en un iPhone físic encara no s'han verificat; consulta les [notes de la versió](docs/v0.11.2.md).
 
