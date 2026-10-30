@@ -220,6 +220,9 @@ if(document.addEventListener)document.addEventListener('click',async event=>{
   }finally{link.removeAttribute('aria-busy');exportInProgress=false;}
 });
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>showPage(button.dataset.view)));
+document.getElementById('home-history-details')?.addEventListener('toggle',event=>{
+  if(event.currentTarget.open) requestAnimationFrame(()=>drawChart(readingsCache));
+});
 document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>showPage(button.dataset.go)));
 window.addEventListener('hashchange',()=>showPage(location.hash.slice(1),false));
 document.querySelectorAll('[data-fermentation-tab]').forEach(button=>button.addEventListener('click',()=>{
@@ -867,4 +870,4 @@ $('probe-form').addEventListener('submit',async event=>{
 });
 showPage(location.hash.slice(1),false);refresh();setInterval(refresh,30000);
 setInterval(refreshFermenterOnly,5000);
-if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.12.1',{updateViaCache:'none'}).catch(()=>{});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.12.2',{updateViaCache:'none'}).catch(()=>{});

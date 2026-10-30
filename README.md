@@ -1,4 +1,6 @@
-# Panettone Lab v0.12.1
+# Panettone Lab v0.12.2
+
+v0.12.2 simplifica la pantalla d’inici: agrupa les lectures en una graella compacta també al mòbil i deixa la gràfica i la captura recent dins «Historial i fotografies», plegat inicialment. Les seccions i funcions continuen disponibles. No canvia APIs, autenticació, SQLite, recollida de dades ni control tèrmic. [Notes v0.12.2](docs/v0.12.2.md).
 
 v0.12.1 fa més visibles l’hora i la vigència de les lectures, diferencia errors i captures antigues, clarifica les escales de temperatura/humitat amb una taula accessible, i ajusta el dashboard a pantalles estretes amb controls tàctils més grans. No canvia APIs, scheduler, autenticació, esquema SQLite, recollida ni dades existents. El redisseny no afegeix ni modifica ordres de control tèrmic. [Notes v0.12.1](docs/v0.12.1.md).
 
