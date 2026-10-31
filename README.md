@@ -1,4 +1,6 @@
-# Panettone Lab v0.15.0
+# Panettone Lab v0.16.0
+
+v0.16.0 compacta la vista simple, fa protagonista la fotografia sense deformar-la, permet recórrer captures, obrir-les a pantalla completa i entrar a «Ajustar detecció». La gràfica combina cambra, massa i humitat amb llegenda interactiva i consulta de valors. En iniciar des del mode simple, activa el seguiment automàtic si encara estava aturat; no altera la lògica de sensors, sessions, calibratge, dades ni control tèrmic. [Notes v0.16.0](docs/v0.16.0.md).
 
 v0.15.0 introdueix el mode simple amb inici guiat en tres passos, seguiment essencial, finalització clara i navegació «Inici / Històric / Ajustos». El mode avançat conserva les pantalles i eines existents. No modifica API, esquema SQLite, dades ni control tèrmic. [Notes v0.15.0](docs/v0.15.0.md).
 

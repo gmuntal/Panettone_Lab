@@ -3,9 +3,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require.resolve('../app/static/app.js'), 'utf8');
-const chart = source.slice(source.indexOf('function drawChart(rows) {'), source.indexOf('\nconst probeLabels='));
+const drawStart = source.indexOf('function drawChart(rows) {');
+const eventStart = source.indexOf("\ndocument.querySelectorAll('[data-chart-series]')", drawStart);
+const tableStart = source.indexOf('function renderChartTable(', eventStart);
+const probeStart = source.indexOf('\nconst probeLabels=', tableStart);
+const chart = source.slice(drawStart,eventStart)+source.slice(tableStart,probeStart);
 
-function render(ambient, dough) {
+function render(ambient, dough, visible={ambient:true,dough:true,humidity:true}) {
   const strokes = [], labels = [], empty = {style: {}}, tableBody = {children:[],replaceChildren(...nodes){this.children=nodes;},append(node){this.children.push(node);}};
   let path = [];
   const ctx = {
@@ -17,7 +21,7 @@ function render(ambient, dough) {
   };
   const canvas = {getBoundingClientRect:()=>({width:350,height:210}),getContext:()=>ctx};
   const element = tag => ({tag,children:[],append(...nodes){this.children.push(...nodes);},set textContent(value){this.text=String(value);},get textContent(){return this.text;}});
-  const context = vm.createContext({window:{devicePixelRatio:1},probeReadingsCache:dough,cssToken:(_name,fallback)=>fallback,
+  const context = vm.createContext({window:{devicePixelRatio:1},probeReadingsCache:dough,chartSeriesVisible:visible,lastChartPoints:[],cssToken:(_name,fallback)=>fallback,
     $: id=>id==='chart'?canvas:id==='chart-data-body'?tableBody:empty,
     document:{createElement:element}, Intl, Date, Number, Math});
   vm.runInContext(chart, context);
@@ -34,7 +38,7 @@ test('mass-only and humidity-only histories produce finite canvas coordinates',(
 });
 test('ambient and mass temperatures share the Celsius axis; humidity has a labelled percent axis',()=>{
   const result=render([row(0,25),row(60,25)],[row(30,25),row(60,25)]);
-  const ambient=result.strokes.find(s=>s.color==='#3e9375').path;
+  const ambient=result.strokes.find(s=>s.color==='#d77d2b').path;
   const dough=result.strokes.find(s=>s.color==='#557dce').path;
   assert.equal(ambient[0][2],dough[0][2]);
   assert.equal(dough[0][1],(ambient[0][1]+ambient[1][1])/2);
@@ -42,6 +46,12 @@ test('ambient and mass temperatures share the Celsius axis; humidity has a label
   assert.ok(humidity.labels.some(label=>label.includes('°')));
   assert.ok(humidity.labels.some(label=>label.includes('%')));
   assert.equal(humidity.tableBody.children.length,2);
+});
+
+test('chart shows a helpful message when every data series is hidden',()=>{
+  const result=render([row(0,25),row(60,26)],[],{ambient:false,dough:false,humidity:false});
+  assert.equal(result.empty.style.display,'grid');
+  assert.match(result.empty.textContent,/almenys una sèrie/i);
 });
 test('invalid samples and long outages break the mass curve',()=>{
   const result=render([],[row(0,20),row(30,null,{sensor_ok:0}),row(60,21),row(300,22)]);
