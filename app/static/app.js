@@ -41,8 +41,10 @@ const cameraSelections=new Map();
 let cameraSelectionGeneration=0;
 let vesselCalibration=null,finalPinned=false,playbackEndId=null,currentImageReady=false,currentImageSequence=0;
 let manualSurfaceDraft=null,manualSurfaceDragging=false,wizardCameraReturn=false;
-let simplePhotoRows=[],simplePhotoIndex=-1,lastChartPoints=[];
-const chartSeriesVisible={ambient:true,dough:true,humidity:true};
+let simplePhotoRows=[],simplePhotoIndex=-1,lastChartPoints=[],chartGrowthRows=[],chartSessionDomain=null;
+let simplePhotoFollowsLatest=true,simplePhotoRefreshPromise=null,simplePhotoSessionId=null,chartSessionId='active',chartTooltipPinned=false,chartKeyboardTime=null,lastChartDomain=[0,1];
+let autoOpenedChartSessionId=null,foregroundRefreshTimer=null;
+const chartSeriesVisible={ambient:true,dough:true,humidity:true,growth:true};
 
 function currentUiMode(){return document.documentElement.dataset.uiMode==='advanced'?'advanced':'simple';}
 function prettyFermentationKind(value){return ({lievito_madre:'Lievito madre',first_dough:'Primer impasto',final_fermentation:'Fermentació final',other:'Una altra fermentació'})[value]||value||'Fermentació';}
@@ -59,8 +61,11 @@ function renderSimpleDashboard(){
   $('simple-session-state').textContent=current?'En curs':finished?'Finalitzada':'Preparat';
   $('header-fermentation-status').textContent=current?'Fermentació en curs':finished?'Fermentació finalitzada':'Preparat';
   const kind=recordedFermentationKind(current||finished);
+  const photoSession=chartSession()||activeFermentation;
+  const photoRowsMatchSession=!photoSession||String(simplePhotoSessionId)===String(photoSession.id);
+  const visiblePhotoRows=photoRowsMatchSession?simplePhotoRows:[];
   title.textContent=current?(kind||'Fermentació en curs'):finished?'Ja està!':'Preparat per començar';
-  message.textContent=current?`${kind||'La fermentació'} està en marxa. Aquí tens el seguiment.`:finished?'La fermentació ha acabat. Pots consultar-ne el resum.':'Quan vulguis, inicia una fermentació.';
+  message.textContent=current?'':finished?'La fermentació ha acabat. Pots consultar-ne el resum.':'Quan vulguis, inicia una fermentació.';
   $('simple-elapsed-fact').hidden=!current;
   if(current){$('simple-elapsed').textContent=elapsedSince(current.started_at);}
   const sensorFresh=$('sensor-freshness').classList.contains('fresh');
@@ -71,22 +76,36 @@ function renderSimpleDashboard(){
   const probeFresh=lastKnownProbeReading&&Date.now()-new Date(lastKnownProbeReading.captured_at).getTime()<=120000;
   $('simple-dough-fact').hidden=!(probeFresh&&probeValue!=='—');
   $('simple-dough-temperature').textContent=probeFresh?`${probeValue} °C`:'— °C';
+  const humidityText=$('humidity').textContent.replace('%','').trim();
+  $('simple-humidity-fact').hidden=!(sensorFresh&&humidityText!=='—');
+  $('simple-humidity').textContent=sensorFresh&&humidityText!=='—'?`${humidityText} %`:'— %';
   const growth=simpleGrowthState?.fermentationId===current?.id?simpleGrowthState:null;
   $('simple-growth-fact').hidden=!(current&&growth?.factor!==null&&Number.isFinite(growth?.factor));
   if(growth?.factor!==null&&Number.isFinite(growth?.factor)){$('simple-growth').textContent=`×${growth.factor.toLocaleString('ca-ES',{minimumFractionDigits:1,maximumFractionDigits:2})}`;$('simple-growth-help').textContent='Alçada estimada per la càmera; no és una mesura exacta.';}
-  const photo=simplePhotoRows[simplePhotoIndex]||lastKnownPhoto,photoAge=photo?Date.now()-new Date(photo.captured_at).getTime():Infinity,photoFresh=photoAge<=Math.max(240000,Number($('camera-status').dataset.intervalSeconds||120)*2*1000);
+  const photo=visiblePhotoRows[simplePhotoIndex]||(!photoSession||String(lastKnownPhoto?.fermentation_id)===String(photoSession.id)?lastKnownPhoto:null),photoAge=photo?Date.now()-new Date(photo.captured_at).getTime():Infinity,photoFresh=photoAge<=Math.max(240000,Number($('camera-status').dataset.intervalSeconds||120)*2*1000);
   const image=$('simple-camera-image'),placeholder=$('simple-camera-placeholder'),stamp=$('simple-photo-time');
-  if(photo?.camera_ok&&photo.filename){image.src=`/photos/${encodeURIComponent(photo.filename)}`;image.hidden=false;placeholder.hidden=true;stamp.hidden=false;stamp.textContent=`${photoFresh?'Darrera fotografia':'Fotografia antiga'} · ${fmtTime(photo.captured_at)}${photoFresh?'':` · ${ageText(photo.captured_at)}`}`;}
+  if(photo?.camera_ok&&photo.filename){const imageUrl=`/photos/${encodeURIComponent(photo.filename)}?revision=${encodeURIComponent(photo.image_revision||photo.id)}`;if(image.dataset.photoUrl!==imageUrl){image.src=imageUrl;image.dataset.photoUrl=imageUrl;}image.hidden=false;placeholder.hidden=true;stamp.hidden=false;stamp.textContent=`${photoFresh?'Darrera fotografia':'Fotografia antiga'} · ${fmtTime(photo.captured_at)}${photoFresh?'':` · ${ageText(photo.captured_at)}`}`;}
   else{image.removeAttribute('src');image.hidden=true;placeholder.hidden=false;stamp.hidden=true;$('simple-camera-message').textContent=current&&!current.camera_enabled?'Les fotografies estan desactivades per a aquesta fermentació.':lastPhotoAttempt&&!lastPhotoAttempt.camera_ok?'No hem pogut obtenir una fotografia. Comprova que la càmera està encesa i connectada.':lastMonitoringState?.active?'Esperant la primera fotografia.':'El seguiment està aturat. Revisa els Ajustos o demana ajuda per activar-lo.';}
   const recording=Boolean(lastMonitoringState?.active);
   $('simple-recording-dot').classList.toggle('is-active',recording);
   $('simple-recording-state').textContent=recording?(current&&!current.camera_enabled?'Lectures guardant-se · fotos desactivades':'Fotos i lectures guardant-se'):current?'Dades sense desar':'Desament de dades aturat';
   const cameraFailed=Boolean(lastPhotoAttempt&&!lastPhotoAttempt.camera_ok);
   $('simple-recording-help').textContent=recording?(current&&!current.camera_enabled?'La fermentació continua i les lectures es desen; les fotos estan desactivades per a aquesta fermentació.':cameraFailed?'La fermentació continua i les lectures es desen, però no hem pogut fer l’última foto. Comprova que la càmera estigui encesa.':'Desem les fotos i lectures perquè quedin a l’historial. Aturar aquest desament no finalitza la fermentació.'):current?'La fermentació continua, però les fotos i lectures no es desen. Pots activar el desament a Ajustos.':'En iniciar una fermentació, activarem el desament de fotos i lectures si estava aturat.';
+  const warning=$('simple-recording-warning');
+  if(current&&!recording){warning.textContent='La fermentació continua, però ara no s’estan desant fotos ni lectures. Activa el registre a Ajustos si vols conservar aquestes dades.';warning.hidden=false;}
+  else if(current&&!current.camera_enabled){warning.textContent='El registre està actiu, però les fotos estan desactivades per a aquesta fermentació.';warning.hidden=false;}
+  else if(current&&cameraFailed){warning.textContent='No hem pogut fer l’última fotografia. Comprova que la càmera estigui encesa i connectada.';warning.hidden=false;}
+  else warning.hidden=true;
   const hasPhoto=Boolean(photo?.camera_ok&&photo.filename);
-  $('simple-photo-previous').disabled=!hasPhoto||(simplePhotoRows.length>0&&simplePhotoIndex<=0);
-  $('simple-photo-next').disabled=!hasPhoto||(simplePhotoRows.length>0&&simplePhotoIndex<0);
+  $('simple-photo-previous').disabled=!hasPhoto||(visiblePhotoRows.length>0&&simplePhotoIndex<=0);
+  $('simple-photo-next').disabled=!hasPhoto||(visiblePhotoRows.length>0&&simplePhotoIndex>=visiblePhotoRows.length-1);
   $('simple-photo-expand').disabled=!image||image.hidden;
+  const slider=$('simple-photo-timeline');
+  slider.min=String(photoSession?.started_at?Date.parse(photoSession.started_at):simplePhotoRows.length?Date.parse(simplePhotoRows[0].captured_at):0);
+  slider.max=String(visiblePhotoRows.length?Date.parse(visiblePhotoRows.at(-1).captured_at):0);slider.step='1000';slider.disabled=visiblePhotoRows.length<2;
+  if(simplePhotoIndex>=0&&visiblePhotoRows[simplePhotoIndex])slider.value=String(Date.parse(visiblePhotoRows[simplePhotoIndex].captured_at));
+  $('simple-photo-timeline-label').textContent=photo?`${fmtTime(photo.captured_at)}${visiblePhotoRows.length?` · ${simplePhotoIndex+1}/${visiblePhotoRows.length}`:''}`:'—';
+  $('simple-photo-latest').hidden=simplePhotoFollowsLatest||!visiblePhotoRows.length||simplePhotoIndex===visiblePhotoRows.length-1;
   if(finished){$('simple-finished-duration').textContent=`Durada: ${durationBetween(finished.started_at,finished.ended_at||Date.now())}`;const facts=$('simple-finished-facts');facts.replaceChildren();const entries=[];if(kind)entries.push(['Què hem fermentat',kind]);if(finished.initial_ph!==null&&finished.initial_ph!==undefined)entries.push(['pH inicial registrat',`${Number(finished.initial_ph).toFixed(2)}`]);const phEvents=(finished.events||[]).filter(event=>event.ph!==null&&event.ph!==undefined),lastPh=phEvents.at(-1);if(lastPh)entries.push(['Darrer pH registrat',`${Number(lastPh.ph).toFixed(2)}`]);if(finished.initial_dough_temp_c!==null&&finished.initial_dough_temp_c!==undefined)entries.push(['Temperatura inicial de la massa',`${Number(finished.initial_dough_temp_c).toFixed(1)} °C`]);const doughEvents=(finished.events||[]).filter(event=>event.dough_temp_c!==null&&event.dough_temp_c!==undefined),lastDough=doughEvents.at(-1);if(lastDough)entries.push(['Darrera temperatura de la massa',`${Number(lastDough.dough_temp_c).toFixed(1)} °C`]);for(const [name,value] of entries){const row=document.createElement('p');row.textContent=`${name}: ${value}`;facts.append(row);}if(!entries.length){const row=document.createElement('p');row.textContent='No hi ha més mesures registrades per mostrar.';facts.append(row);}}
 }
 
@@ -117,8 +136,48 @@ async function refreshFermentation(sequence=null) {
     : 'Cap fermentació en curs. El desament automàtic guarda lectures i fotos de la cambra, encara que no hagis iniciat una fermentació.';
   $('fermentation-form').hidden=Boolean(activeFermentation);
   $('end-fermentation').hidden=!activeFermentation;
+  updateChartSessionOptions();
   renderFermentations();
   return data;
+}
+
+function chartSession(){
+  if(chartSessionId==='active')return activeFermentation||fermentationsCache.find(item=>!item.ended_at)||fermentationsCache[0]||null;
+  return fermentationsCache.find(item=>String(item.id)===String(chartSessionId))||null;
+}
+function updateChartSessionOptions(){
+  const select=$('chart-session'),signature=JSON.stringify(fermentationsCache.map(item=>[item.id,item.started_at,item.ended_at]));
+  if(select.dataset.signature===signature)return;
+  select.replaceChildren();
+  const activeOption=document.createElement('option');activeOption.value='active';activeOption.textContent=activeFermentation?'Fermentació activa':'Fermentació més recent';select.append(activeOption);
+  for(const item of fermentationsCache){const option=document.createElement('option');option.value=String(item.id);option.textContent=`${recordedFermentationKind(item)||'Fermentació'} · ${new Date(item.started_at).toLocaleDateString('ca-ES')}${item.ended_at?'':' · en curs'}`;select.append(option);}
+  select.dataset.signature=signature;
+  if(chartSessionId!=='active'&&!fermentationsCache.some(item=>String(item.id)===String(chartSessionId)))chartSessionId='active';
+  select.value=chartSessionId;
+}
+async function refreshUnifiedChart(){
+  const session=chartSession(),range=$('range').value;
+  chartGrowthRows=[];chartSessionDomain=null;
+  if(!session){drawChart(readingsCache);return;}
+  const start=session.started_at,end=session.ended_at||new Date().toISOString();
+  const sessionStart=Date.parse(start),sessionEnd=Date.parse(end);
+  const visibleStart=range==='fermentation'?start:new Date(Math.max(sessionStart,Date.now()-Number(range)*3600000)).toISOString();
+  chartSessionDomain=range==='fermentation'?session:null;
+  try{
+    const [growth,ambient,probeRows]=await Promise.all([
+      json(`/api/growth/sequence?fermentation_id=${encodeURIComponent(session.id)}`),
+      json(`/api/readings?start=${encodeURIComponent(visibleStart)}&end=${encodeURIComponent(end)}&fermentation_id=${encodeURIComponent(session.id)}`),
+      json(`/api/probe/readings?start=${encodeURIComponent(visibleStart)}&end=${encodeURIComponent(end)}&fermentation_id=${encodeURIComponent(session.id)}`)
+    ]);
+    chartGrowthRows=window.PanettoneChartState.growthPoints(growth.frames||[]);
+    readingsCache=ambient||[];probeReadingsCache=probeRows||[];
+    const low=Date.parse(visibleStart),high=sessionEnd;
+    chartGrowthRows=chartGrowthRows.filter(point=>Date.parse(point.captured_at)>=low&&Date.parse(point.captured_at)<=high);
+  }catch(error){chartGrowthRows=[];if(error.message!=='Sessió caducada')console.warn('No s’ha pogut actualitzar el creixement del gràfic',error);}
+  drawChart(readingsCache);
+  if(currentUiMode()==='simple'&&activeFermentation&&String(chartSession()?.id)===String(activeFermentation.id)&&autoOpenedChartSessionId!==String(activeFermentation.id)){
+    const history=$('home-history-details');if(history){history.open=true;autoOpenedChartSessionId=String(activeFermentation.id);requestAnimationFrame(()=>drawChart(readingsCache));}
+  }
 }
 
 const eventLabels={refresh:'Refresc',ph_measurement:'Mesura de pH',dough_temperature:'Temperatura de la massa',
@@ -337,38 +396,46 @@ function drawChart(rows) {
   if(!box.width||!box.height)return;
   canvas.width=box.width*dpr;canvas.height=box.height*dpr;
   const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);lastChartPoints=[];
-  const w=box.width,h=box.height,p={l:43,r:43,t:14,b:27};
-  const ambient=rows.filter(row=>Number.isFinite(Date.parse(row.captured_at)));
-  const dough=probeReadingsCache.filter(row=>Number.isFinite(Date.parse(row.captured_at)));
+  const w=box.width,h=box.height,p={l:48,r:58,t:16,b:28};
+  const sessionStart=chartSessionDomain?Date.parse(chartSessionDomain.started_at):null,sessionEnd=chartSessionDomain?Date.parse(chartSessionDomain.ended_at||Date.now()):null;
+  const inSession=row=>!chartSessionDomain||(Date.parse(row.captured_at)>=sessionStart&&Date.parse(row.captured_at)<=sessionEnd);
+  const ambient=rows.filter(row=>Number.isFinite(Date.parse(row.captured_at))&&inSession(row));
+  const dough=probeReadingsCache.filter(row=>Number.isFinite(Date.parse(row.captured_at))&&inSession(row));
   const validRows=(data,key)=>data.filter(row=>row.sensor_ok&&Number.isFinite(Number(row[key]))&&row[key]!==null);
   const ambientTemp=chartSeriesVisible.ambient?validRows(ambient,'temperature_c'):[],doughTemp=chartSeriesVisible.dough?validRows(dough,'temperature_c'):[],humidity=chartSeriesVisible.humidity?validRows(ambient,'humidity_rh'):[];
+  const growth=chartSeriesVisible.growth?chartGrowthRows.filter(inSession):[];
   const temperatures=[...ambientTemp,...doughTemp].map(row=>Number(row.temperature_c));
   const humidities=humidity.map(row=>Number(row.humidity_rh));
-  const all=[...ambientTemp,...doughTemp,...humidity].sort((a,b)=>Date.parse(a.captured_at)-Date.parse(b.captured_at));
+  const all=[...ambientTemp,...doughTemp,...humidity,...growth].sort((a,b)=>Date.parse(a.captured_at)-Date.parse(b.captured_at));
   const hasData=all.length>0;
   $('chart-empty').textContent=!Object.values(chartSeriesVisible).some(Boolean)?'Activa almenys una sèrie per veure les dades.':(rows.length||dough.length)?'No hi ha cap valor vàlid de sensor en aquest període.':'Encara no hi ha lectures en aquest període.';
   $('chart-empty').style.display=hasData?'none':'grid';
-  renderChartTable(ambientTemp,doughTemp,humidity);
+  renderChartTable(ambientTemp,doughTemp,humidity,growth);
   if(!hasData)return;
   const bounds=(values,pad,fallback)=>values.length?[Math.floor(Math.min(...values)-pad),Math.ceil(Math.max(...values)+pad)]:fallback;
   const [tMin,tMax]=bounds(temperatures,1,[0,1]),[hMin,hMax]=bounds(humidities,5,[0,1]);
-  const first=Date.parse(all[0].captured_at),last=Date.parse(all.at(-1).captured_at);
-  lastChartPoints=[...ambientTemp.map(row=>({series:'Cambra',row,key:'temperature_c',unit:'°C'})),...doughTemp.map(row=>({series:'Massa',row,key:'temperature_c',unit:'°C'})),...humidity.map(row=>({series:'Humitat',row,key:'humidity_rh',unit:'%'}))];
+  const times=all.map(row=>Date.parse(row.captured_at));
+  const [first,last]=chartSessionDomain?[sessionStart,sessionEnd]:[Math.min(...times),Math.max(...times)];
+  lastChartDomain=[first,last];
+  lastChartPoints=[...ambientTemp.map(row=>({series:'Cambra',row,key:'temperature_c',unit:'°C'})),...doughTemp.map(row=>({series:'Massa',row,key:'temperature_c',unit:'°C'})),...humidity.map(row=>({series:'Humitat',row,key:'humidity_rh',unit:'%'})),...growth.map(row=>({series:'Creixement',row,key:'factor',unit:'×'}))];
   const plot=(value,min,max)=>max===min?.5:(value-min)/(max-min);
   ctx.font='10px sans-serif';ctx.fillStyle=cssToken('--chart-label','#596c62');ctx.strokeStyle=cssToken('--chart-grid','#e8ece9');ctx.lineWidth=1;
   for(let i=0;i<4;i++){
     const y=p.t+(h-p.t-p.b)*i/3;
     ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();
-    if(temperatures.length)ctx.fillText(`${(tMax-(tMax-tMin)*i/3).toFixed(1)}°`,0,y+3);
+    if(temperatures.length)ctx.fillText(`${(tMax-(tMax-tMin)*i/3).toFixed(1)}°`,1,y+3);
     if(humidities.length)ctx.fillText(`${(hMax-(hMax-hMin)*i/3).toFixed(0)}%`,w-p.r+4,y+3);
   }
   if(!temperatures.length)ctx.fillText('Sense °C',0,p.t-4);
   if(!humidities.length)ctx.fillText('Sense %',w-p.r+2,p.t-4);
+  const growthMin=1,growthMax=Math.max(3,Math.ceil(Math.max(...growth.map(row=>row.factor),1)));
+  if(growth.length){ctx.fillStyle=cssToken('--chart-growth','#8056a8');for(let i=0;i<3;i++){const factor=growthMax-(growthMax-growthMin)*i/2,y=p.t+(h-p.t-p.b)*i/2;ctx.fillText(`×${factor.toFixed(0)}`,w-p.r-36,y+3);}}
   const series=(data,key,min,max,color)=>{
     ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineJoin='round';ctx.beginPath();let started=false,previous=null;
+    const maxGap=window.PanettoneChartState.gapLimit(data);
     data.forEach(row=>{const value=Number(row[key]),time=Date.parse(row.captured_at);
       if(!row.sensor_ok||row[key]===null||!Number.isFinite(value)){started=false;previous=null;return;}
-      if(previous!==null&&time-previous>90000)started=false;
+      if(previous!==null&&time-previous>maxGap)started=false;
       const x=p.l+(w-p.l-p.r)*plot(time,first,last),y=p.t+(h-p.t-p.b)*(1-plot(value,min,max));
       if(!started){ctx.moveTo(x,y);started=true}else ctx.lineTo(x,y);previous=time;
     });ctx.stroke();
@@ -376,27 +443,48 @@ function drawChart(rows) {
   if(ambientTemp.length)series(ambient,'temperature_c',tMin,tMax,cssToken('--chart-temperature','#d77d2b'));
   if(doughTemp.length)series(dough,'temperature_c',tMin,tMax,cssToken('--chart-dough','#557dce'));
   if(humidity.length)series(ambient,'humidity_rh',hMin,hMax,cssToken('--chart-humidity','#32906b'));
-  ctx.fillStyle=cssToken('--chart-label','#74837e');const label=time=>new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(time));
-  ctx.fillText(label(first),p.l,h-4);ctx.fillText(label(last),Math.max(p.l,w-p.r-35),h-4);
+  if(growth.length){
+    ctx.strokeStyle=cssToken('--chart-growth','#8056a8');ctx.lineWidth=2;ctx.beginPath();let started=false,previous=null;const maxGap=window.PanettoneChartState.gapLimit(growth,300000);
+    growth.forEach(row=>{const time=Date.parse(row.captured_at);if(previous!==null&&time-previous>maxGap)started=false;const x=p.l+(w-p.l-p.r)*plot(time,first,last),y=p.t+(h-p.t-p.b)*(1-plot(row.factor,growthMin,growthMax));if(started)ctx.lineTo(x,y);else ctx.moveTo(x,y);started=true;previous=time;});ctx.stroke();
+    ctx.fillStyle=cssToken('--chart-growth','#8056a8');for(const row of growth){ctx.beginPath();ctx.arc(p.l+(w-p.l-p.r)*plot(Date.parse(row.captured_at),first,last),p.t+(h-p.t-p.b)*(1-plot(row.factor,growthMin,growthMax)),2.5,0,Math.PI*2);ctx.fill();}
+  }
+  ctx.fillStyle=cssToken('--chart-label','#74837e');
+  if(chartSessionDomain){const totalHours=Math.max(0,(last-first)/3600000),step=Math.max(1,Math.ceil(totalHours/Math.max(2,Math.floor((w-p.l-p.r)/48))));for(let hour=0;hour<=totalHours;hour+=step){const x=p.l+(w-p.l-p.r)*hour/Math.max(totalHours,1);ctx.fillText(`${hour} h`,Math.min(w-p.r-25,x),h-4);}}
+  else{const label=time=>new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(time));ctx.fillText(label(first),p.l,h-4);ctx.fillText(label(last),Math.max(p.l,w-p.r-35),h-4);}
 }
 
 document.querySelectorAll('[data-chart-series]').forEach(button=>button.addEventListener('click',()=>{
   const key=button.dataset.chartSeries;chartSeriesVisible[key]=!chartSeriesVisible[key];
   button.setAttribute('aria-pressed',String(chartSeriesVisible[key]));button.classList.toggle('is-muted',!chartSeriesVisible[key]);drawChart(readingsCache);
 }));
-$('chart').addEventListener('click',event=>{
+$('chart').addEventListener('pointermove',event=>{if(event.pointerType==='touch'){chartTooltipPinned=true;showChartTooltipAt(event,true);}else showChartTooltipAt(event,false);});
+$('chart').addEventListener('pointerdown',event=>{chartTooltipPinned=event.pointerType==='touch';showChartTooltipAt(event,true);});
+$('chart').addEventListener('pointerleave',()=>{if(!chartTooltipPinned)$('chart-tooltip').hidden=true;});
+$('chart').addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Escape'].includes(event.key))return;event.preventDefault();if(event.key==='Escape'){$('chart-tooltip').hidden=true;chartTooltipPinned=false;return;}if(!lastChartPoints.length)return;chartKeyboardTime=chartKeyboardTime??lastChartDomain[0];chartKeyboardTime=Math.max(lastChartDomain[0],Math.min(lastChartDomain[1],chartKeyboardTime+(event.key==='ArrowRight'?60000:-60000)));chartTooltipPinned=true;showChartTooltipTime(chartKeyboardTime,true);});
+$('chart-tooltip-close').addEventListener('click',()=>{$('chart-tooltip').hidden=true;chartTooltipPinned=false;});
+document.addEventListener('pointerdown',event=>{if(!event.target.closest('.chart-wrap')){chartTooltipPinned=false;$('chart-tooltip').hidden=true;}});
+function showChartTooltipAt(event,syncPhoto){const rect=$('chart').getBoundingClientRect(),ratio=Math.max(0,Math.min(1,(event.clientX-rect.left-48)/(rect.width-48-58)));showChartTooltipTime(lastChartDomain[0]+(lastChartDomain[1]-lastChartDomain[0])*ratio,syncPhoto);}
+function showChartTooltipTime(target,syncPhoto=false){
   if(!lastChartPoints.length)return;
-  const rect=event.currentTarget.getBoundingClientRect(),x=event.clientX-rect.left,paddingLeft=43,paddingRight=43;
-  const plotRatio=Math.max(0,Math.min(1,(x-paddingLeft)/(rect.width-paddingLeft-paddingRight)));
-  const times=lastChartPoints.map(point=>Date.parse(point.row.captured_at)),start=Math.min(...times),end=Math.max(...times),target=start+(end-start)*plotRatio;
-  const nearby=lastChartPoints.map(point=>({...point,delta:Math.abs(Date.parse(point.row.captured_at)-target)})).sort((a,b)=>a.delta-b.delta);
-  const chosen=[];for(const name of ['Cambra','Massa','Humitat']){const point=nearby.find(item=>item.series===name);if(point&&point.delta<=90000)chosen.push(`${name} ${Number(point.row[point.key]).toLocaleString('ca-ES',{maximumFractionDigits:1})} ${point.unit} · ${new Date(point.row.captured_at).toLocaleTimeString('ca-ES',{hour:'2-digit',minute:'2-digit'})}`);}
-  const tip=$('chart-tooltip');if(!chosen.length){tip.textContent='No hi ha lectures a prop d’aquest moment.';}else tip.textContent=chosen.join('  ·  ');tip.hidden=false;
-});
+  const groups=['Cambra','Massa','Humitat','Creixement'],maxDeltas={Cambra:90000,Massa:180000,Humitat:90000,Creixement:180000};
+  const chosen=[];
+  for(const name of groups){const candidates=lastChartPoints.filter(point=>point.series===name).map(point=>({...point,delta:Math.abs(Date.parse(point.row.captured_at)-target)})).sort((a,b)=>a.delta-b.delta);const point=candidates[0];
+    if(point&&point.delta<=maxDeltas[name]){const value=Number(point.row[point.key]).toLocaleString('ca-ES',{maximumFractionDigits:2});chosen.push({name,text:`${name}: ${name==='Creixement'?'×':''}${value}${name==='Creixement'?'':' '+point.unit} · ${new Date(point.row.captured_at).toLocaleTimeString('ca-ES',{hour:'2-digit',minute:'2-digit'})}`});}
+  }
+  const photo=window.PanettoneChartState.nearest(simplePhotoRows,new Date(target).toISOString(),180000);
+  if(photo&&syncPhoto){const index=simplePhotoRows.findIndex(row=>String(row.id)===String(photo.id));if(index>=0){simplePhotoIndex=index;simplePhotoFollowsLatest=index===simplePhotoRows.length-1&&target>=Date.parse(photo.captured_at);renderSimpleDashboard();}}
+  const content=$('chart-tooltip-content');content.replaceChildren();
+  const elapsed=chartSessionDomain?durationBetween(chartSessionDomain.started_at,new Date(target).toISOString()):new Date(target).toLocaleTimeString('ca-ES',{hour:'2-digit',minute:'2-digit'});
+  const time=document.createElement('strong');time.className='chart-tooltip-time';time.textContent=elapsed;content.append(time);
+  for(const item of chosen){const value=document.createElement('span');value.className=`chart-tooltip-value chart-tooltip-${item.name.toLowerCase()}`;value.textContent=item.text;content.append(value);}
+  if(!chosen.length){const empty=document.createElement('span');empty.textContent='No hi ha mostres a prop d’aquest instant.';content.append(empty);}
+  if(photo){const photoTime=document.createElement('span');photoTime.className='chart-tooltip-photo';photoTime.textContent=`Foto més propera ${fmtTime(photo.captured_at)}`;content.append(photoTime);}
+  $('chart-tooltip').hidden=false;
+}
 
-function renderChartTable(ambientTemp,doughTemp,humidity){
+function renderChartTable(ambientTemp,doughTemp,humidity,growth=[]){
   const body=$('chart-data-body'),points=[];
-  for(const [label,rows,key,unit] of [['Ambient',ambientTemp,'temperature_c','°C'],['Massa',doughTemp,'temperature_c','°C'],['Humitat relativa',humidity,'humidity_rh','%']]){
+  for(const [label,rows,key,unit] of [['Cambra',ambientTemp,'temperature_c','°C'],['Massa',doughTemp,'temperature_c','°C'],['Humitat relativa',humidity,'humidity_rh','%'],['Creixement',growth,'factor','×']]){
     rows.slice(-12).forEach(row=>points.push({label,time:row.captured_at,value:Number(row[key]),unit}));
   }
   points.sort((a,b)=>Date.parse(b.time)-Date.parse(a.time));body.replaceChildren();
@@ -413,7 +501,12 @@ async function refreshProbe(){
   const sequence=++probeRefreshSequence;
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),8000);
   try{
-    const [status,rows]=await Promise.all([json('/api/probe',{signal:controller.signal}),json(`/api/probe/readings?hours=${$('range').value}`,{signal:controller.signal})]);
+    const rangeValue=$('range').value,selected=chartSession();
+    const start=selected?Math.max(Date.parse(selected.started_at),rangeValue==='fermentation'?Date.parse(selected.started_at):Date.now()-Number(rangeValue)*3600000):null;
+    const rangeUrl=selected
+      ?`/api/probe/readings?start=${encodeURIComponent(new Date(start).toISOString())}&end=${encodeURIComponent(selected.ended_at||new Date().toISOString())}&fermentation_id=${encodeURIComponent(selected.id)}`
+      :`/api/probe/readings?hours=${rangeValue==='fermentation'?24:rangeValue}`;
+    const [status,rows]=await Promise.all([json('/api/probe',{signal:controller.signal}),json(rangeUrl,{signal:controller.signal})]);
     if(sequence!==probeRefreshSequence)return;
     probeReadingsCache=rows;
     const validProbe=[...rows].reverse().find(row=>row.sensor_ok&&row.temperature_c!==null&&Number.isFinite(Number(row.temperature_c)));
@@ -685,22 +778,45 @@ $('simple-fermentation-form').addEventListener('submit',async event=>{
 $('fermentation-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,payload=Object.fromEntries(new FormData(form));payload.camera_enabled=form.elements.camera_enabled.checked;await createFermentation(payload,$('session-status'),form);});
 $('simple-finish-button').addEventListener('click',async()=>{if(!activeFermentation||!window.confirm('Vols finalitzar aquesta fermentació?'))return;try{await json(`/api/fermentations/${activeFermentation.id}/end`,{method:'POST'});await refresh();}catch(error){window.alert(`No s’ha pogut finalitzar. ${error.message}`);}});
 async function loadSimplePhotos(){
-  const rows=await json('/api/photos?limit=3000');
-  const valid=(rows||[]).filter(row=>row.camera_ok&&row.filename).sort((a,b)=>new Date(a.captured_at)-new Date(b.captured_at));
-  const attached=activeFermentation?valid.filter(row=>String(row.fermentation_id)===String(activeFermentation.id)||Date.parse(row.captured_at)>=Date.parse(activeFermentation.started_at)):valid;
-  simplePhotoRows=attached.length?attached:valid;
-  const currentId=(simplePhotoRows.find(row=>String(row.id)===String(lastKnownPhoto?.id))||simplePhotoRows.at(-1))?.id;
-  simplePhotoIndex=simplePhotoRows.findIndex(row=>String(row.id)===String(currentId));
-  renderSimpleDashboard();
+  return refreshSimplePhotos(true);
+}
+async function refreshSimplePhotos(force=false){
+  if(simplePhotoRefreshPromise)return simplePhotoRefreshPromise;
+  const previousId=simplePhotoRows[simplePhotoIndex]?.id;
+  const wasLatest=simplePhotoFollowsLatest||simplePhotoIndex<0||simplePhotoIndex===simplePhotoRows.length-1;
+  const session=chartSession()||activeFermentation;
+  const start=session?.started_at,end=session?.ended_at||new Date().toISOString();
+  const full=force||!session||String(simplePhotoSessionId)!==String(session.id)||!simplePhotoRows.length;
+  const from=full?start:(simplePhotoRows.at(-1)?.captured_at||start);
+  const url=from?`/api/photos?start=${encodeURIComponent(from)}&end=${encodeURIComponent(end)}&limit=${full?3000:100}`:'/api/photos?limit=48';
+  simplePhotoRefreshPromise=(async()=>{
+    try{
+      const rows=await json(url),newRows=(rows||[]).filter(row=>row.camera_ok&&row.filename&&(!session||String(row.fermentation_id)===String(session.id)))
+        .sort((a,b)=>Date.parse(a.captured_at)-Date.parse(b.captured_at)||a.id-b.id);
+      const currentSession=chartSession()||activeFermentation;
+      if(String(session?.id??'')!==String(currentSession?.id??''))return;
+      if(session)simplePhotoSessionId=session.id;
+      const valid=full?newRows:[...simplePhotoRows,...newRows].filter((row,index,all)=>all.findIndex(other=>String(other.id)===String(row.id))===index);
+      const previousStillAvailable=valid.some(row=>String(row.id)===String(previousId));
+      simplePhotoRows=valid;
+      if(wasLatest||!previousStillAvailable){simplePhotoIndex=valid.length-1;simplePhotoFollowsLatest=true;}
+      else{simplePhotoIndex=valid.findIndex(row=>String(row.id)===String(previousId));simplePhotoFollowsLatest=false;}
+      renderSimpleDashboard();
+    }catch(error){if(force)$('simple-camera-message').textContent='No hem pogut carregar les fotografies. Comprova la connexió i torna-ho a provar.';}
+    finally{simplePhotoRefreshPromise=null;}
+  })();
+  return simplePhotoRefreshPromise;
 }
 async function stepSimplePhoto(delta){
   if(!simplePhotoRows.length){try{await loadSimplePhotos();}catch(error){$('simple-camera-message').textContent='No hem pogut carregar les fotografies anteriors. Comprova la connexió i torna-ho a provar.';return;}}
   if(!simplePhotoRows.length)return;
   if(simplePhotoIndex<0)simplePhotoIndex=simplePhotoRows.length-1;
-  simplePhotoIndex=Math.max(0,Math.min(simplePhotoRows.length-1,simplePhotoIndex+delta));renderSimpleDashboard();
+  simplePhotoIndex=Math.max(0,Math.min(simplePhotoRows.length-1,simplePhotoIndex+delta));simplePhotoFollowsLatest=simplePhotoIndex===simplePhotoRows.length-1;renderSimpleDashboard();
 }
 $('simple-photo-previous').addEventListener('click',()=>void stepSimplePhoto(-1));
 $('simple-photo-next').addEventListener('click',()=>void stepSimplePhoto(1));
+$('simple-photo-timeline').addEventListener('input',event=>{const photo=window.PanettoneChartState.nearest(simplePhotoRows,new Date(Number(event.currentTarget.value)).toISOString());if(photo)simplePhotoIndex=simplePhotoRows.findIndex(row=>String(row.id)===String(photo.id));simplePhotoFollowsLatest=simplePhotoIndex===simplePhotoRows.length-1;renderSimpleDashboard();});
+$('simple-photo-latest').addEventListener('click',()=>{if(!simplePhotoRows.length)return;simplePhotoIndex=simplePhotoRows.length-1;simplePhotoFollowsLatest=true;renderSimpleDashboard();});
 $('simple-camera-image').addEventListener('click',()=>{$('photo-fullscreen-image').src=$('simple-camera-image').src;$('photo-fullscreen-dialog').showModal();});
 $('simple-photo-expand').addEventListener('click',()=>{$('photo-fullscreen-image').src=$('simple-camera-image').src;$('photo-fullscreen-dialog').showModal();});
 $('photo-fullscreen-close').addEventListener('click',()=>$('photo-fullscreen-dialog').close());
@@ -949,10 +1065,11 @@ async function refresh() {
   void refreshProbe();
   const requestSequence=++refreshSequence;
   const previousActiveId=activeFermentation?.id??null;
+  const rangeHours=$('range').value==='fermentation'?24:$('range').value;
   try {
     const [state,readings,monitoring,fermenter,fermenterHistoryData,fermentationData]=await Promise.all([
-      json('/api/state'),json(`/api/readings?hours=${$('range').value}`),json('/api/monitoring'),json('/api/fermenter'),
-      json(`/api/fermenter/history?hours=${$('range').value}`),refreshFermentation(requestSequence)
+      json('/api/state'),json(`/api/readings?hours=${rangeHours}`),json('/api/monitoring'),json('/api/fermenter'),
+      json(`/api/fermenter/history?hours=${rangeHours}`),refreshFermentation(requestSequence)
     ]);
     if(!PanettoneCameraState.isLatestRequest(requestSequence,refreshSequence))return;
     readingsCache=readings;
@@ -969,7 +1086,8 @@ async function refresh() {
     const latestImage=$('home-camera-image');
     if(lastKnownPhoto?.camera_ok&&lastKnownPhoto.filename){latestImage.src=`/photos/${encodeURIComponent(lastKnownPhoto.filename)}`;latestImage.hidden=false;$('home-camera-time').textContent=`Captura ${new Date(lastKnownPhoto.captured_at).toLocaleString('ca-ES')} · ${ageText(lastKnownPhoto.captured_at)}${lastPhotoAttempt&&!lastPhotoAttempt.camera_ok?` · l’últim intent ha fallat (${fmtTime(lastPhotoAttempt.captured_at)})`:''}`;}
     else{latestImage.removeAttribute('src');latestImage.hidden=true;$('home-camera-time').textContent=lastPhotoAttempt?`L’últim intent de captura no ha produït una imatge vàlida · ${fmtTime(lastPhotoAttempt.captured_at)}`:'Encara no hi ha cap fotografia disponible.';}
-    drawChart(readings);
+    await refreshUnifiedChart();
+    if((currentUiMode()==='simple'&&location.hash!=='#fermentations'&&location.hash!=='#settings')||$('range').value==='fermentation')void refreshSimplePhotos();
     lastDashboardRefreshAt=new Date();$('dashboard-refresh').textContent=`Consulta completada · ${lastDashboardRefreshAt.toLocaleTimeString('ca-ES',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`;$('dashboard-feedback').hidden=true;
     if(location.hash==='#camera')void refreshCamera();
     lastMonitoringState=monitoring;
@@ -1050,10 +1168,15 @@ $('camera-fermentation').addEventListener('change',event=>selectCameraFermentati
 $('photo-latest').addEventListener('click',()=>{if(!photoLibrary.length)return;stopPlayback();finalPinned=false;playbackEndId=null;selectPhoto(photoLibrary.at(-1).id,{manual:false});});
 
 $('range').addEventListener('change',refresh);
+$('chart-session').addEventListener('change',event=>{chartSessionId=event.currentTarget.value;void refresh();});
 $('photo-sampling').addEventListener('change',()=>renderPhotoLibrary(allPhotos));
 $('timelapse-speed').addEventListener('change',()=>{if(timelapseTimer){stopPlayback();playTimelapse();}});
 let timer;
 window.addEventListener('resize',()=>{clearTimeout(timer);timer=setTimeout(refresh,200)});
+function refreshOnForeground(){if(document.visibilityState==='hidden')return;clearTimeout(foregroundRefreshTimer);foregroundRefreshTimer=setTimeout(()=>{void refresh();},300);}
+window.addEventListener('pageshow',refreshOnForeground);
+window.addEventListener('focus',refreshOnForeground);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshOnForeground();});
 $('probe-form').addEventListener('input',()=>{$('probe-form').dataset.dirty='1';});
 $('probe-form').addEventListener('submit',async event=>{
   event.preventDefault();const button=event.currentTarget.querySelector('button');button.disabled=true;

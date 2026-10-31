@@ -33,7 +33,7 @@ from . import push
 from . import archiving
 from . import probe
 
-APP_VERSION = "0.16.1"
+APP_VERSION = "0.17.0"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -317,6 +317,14 @@ def create_app(start_background=False):
     @app.get("/api/readings")
     @login_required
     def readings():
+        start, end = query_range()
+        if start or end:
+            clause, params = add_range_clauses("captured_at", start, end)
+            fermentation_id = fermentation_filter()
+            if fermentation_id is not None:
+                clause += (" AND " if clause else " WHERE ") + "fermentation_id=?"
+                params.append(fermentation_id)
+            return jsonify(read_rows(f"SELECT * FROM readings{clause} ORDER BY captured_at,id", params))
         try:
             hours = min(24 * 30, max(1, int(request.args.get("hours", "24"))))
         except ValueError:
@@ -341,13 +349,21 @@ def create_app(start_background=False):
     @app.get("/api/probe/readings")
     @login_required
     def probe_readings():
+        start, end = query_range()
+        fermentation_id = fermentation_filter()
+        if start or end:
+            clause, params = add_range_clauses("captured_at", start, end)
+            if fermentation_id is not None:
+                clause += (" AND " if clause else " WHERE ") + "fermentation_id=?"
+                params.append(fermentation_id)
+            return jsonify(read_rows(f"SELECT * FROM dough_probe_readings{clause} ORDER BY captured_at,id", params))
         try:
             hours = int(request.args.get("hours", "24"))
             if not 1 <= hours <= 720:
                 raise ValueError()
         except ValueError:
             return jsonify({"error": "hours ha de ser entre 1 i 720"}), 400
-        return jsonify(probe.readings(hours, fermentation_filter()))
+        return jsonify(probe.readings(hours, fermentation_id))
 
     @app.get("/api/photos")
     @login_required

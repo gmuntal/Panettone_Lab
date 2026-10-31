@@ -3,25 +3,28 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require.resolve('../app/static/app.js'), 'utf8');
+const chartStateSource=fs.readFileSync(require.resolve('../app/static/chart-state.js'),'utf8');
 const drawStart = source.indexOf('function drawChart(rows) {');
 const eventStart = source.indexOf("\ndocument.querySelectorAll('[data-chart-series]')", drawStart);
 const tableStart = source.indexOf('function renderChartTable(', eventStart);
 const probeStart = source.indexOf('\nconst probeLabels=', tableStart);
 const chart = source.slice(drawStart,eventStart)+source.slice(tableStart,probeStart);
 
-function render(ambient, dough, visible={ambient:true,dough:true,humidity:true}) {
+function render(ambient, dough, visible={ambient:true,dough:true,humidity:true,growth:true},growth=[]) {
   const strokes = [], labels = [], empty = {style: {}}, tableBody = {children:[],replaceChildren(...nodes){this.children=nodes;},append(node){this.children.push(node);}};
   let path = [];
   const ctx = {
     scale() {}, beginPath() { path = []; },
     moveTo(x,y) { assert.ok(Number.isFinite(x)&&Number.isFinite(y)); path.push(['move',x,y]); },
     lineTo(x,y) { assert.ok(Number.isFinite(x)&&Number.isFinite(y)); path.push(['line',x,y]); },
+    arc(x,y) { assert.ok(Number.isFinite(x)&&Number.isFinite(y)); }, fill() {},
     stroke() { strokes.push({color:this.strokeStyle,path:[...path]}); },
     fillText(text,x,y) { assert.ok(Number.isFinite(x)&&Number.isFinite(y)); labels.push(String(text)); }
   };
   const canvas = {getBoundingClientRect:()=>({width:350,height:210}),getContext:()=>ctx};
   const element = tag => ({tag,children:[],append(...nodes){this.children.push(...nodes);},set textContent(value){this.text=String(value);},get textContent(){return this.text;}});
-  const context = vm.createContext({window:{devicePixelRatio:1},probeReadingsCache:dough,chartSeriesVisible:visible,lastChartPoints:[],cssToken:(_name,fallback)=>fallback,
+  const window={devicePixelRatio:1};vm.runInNewContext(chartStateSource,{window,Date,Number,Math});
+  const context = vm.createContext({window,probeReadingsCache:dough,chartGrowthRows:growth,chartSessionDomain:null,chartSeriesVisible:visible,lastChartPoints:[],cssToken:(_name,fallback)=>fallback,
     $: id=>id==='chart'?canvas:id==='chart-data-body'?tableBody:empty,
     document:{createElement:element}, Intl, Date, Number, Math});
   vm.runInContext(chart, context);
@@ -57,4 +60,16 @@ test('invalid samples and long outages break the mass curve',()=>{
   const result=render([],[row(0,20),row(30,null,{sensor_ok:0}),row(60,21),row(300,22)]);
   const mass=result.strokes.find(s=>s.color==='#557dce').path;
   assert.ok(mass.every(point=>point[0]==='move'));
+});
+
+test('the unified chart includes growth on its separate labelled scale',()=>{
+  const growth=[{captured_at:'2026-10-30T12:00:00Z',factor:1,source:'automatic'},
+    {captured_at:'2026-10-30T12:02:00Z',factor:2,source:'manual'}];
+  const result=render([row(0,25,{humidity_rh:55}),row(120,26,{humidity_rh:57})],
+    [row(60,24)],{ambient:true,dough:true,humidity:true,growth:true},growth);
+  const colors=new Set(result.strokes.map(stroke=>stroke.color));
+  assert.ok(colors.has('#8056a8'));
+  assert.ok(['#d77d2b','#557dce','#32906b','#8056a8'].every(color=>colors.has(color)));
+  assert.ok(result.labels.some(label=>label.startsWith('×')));
+  assert.equal(result.tableBody.children.length,7);
 });

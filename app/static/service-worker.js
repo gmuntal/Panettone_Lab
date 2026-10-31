@@ -7,6 +7,7 @@ const SHELL=[
   `/static/simple-mode.css?v=${VERSION}`,
   `/static/theme.js?v=${VERSION}`,
   `/static/camera-state.js?v=${VERSION}`,
+  `/static/chart-state.js?v=${VERSION}`,
   `/static/app.js?v=${VERSION}`,
   `/static/icons/apple-touch-icon.png?v=${VERSION}`,
   `/static/icons/favicon-32.png?v=${VERSION}`,

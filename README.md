@@ -1,4 +1,6 @@
-# Panettone Lab v0.16.1
+# Panettone Lab v0.17.0
+
+v0.17.0 uneix en una sola gràfica la temperatura de cambra, la temperatura de massa, la humitat i el creixement visual fiable; afegeix selecció explícita de fermentació, cronologia temporal de fotos, sincronització foto/gràfic i refresc en reobrir la PWA. Les consultes de gràfic només llegeixen dades de la sessió seleccionada. No modifica SQLite, dades, calibratges ni control tèrmic. [Notes v0.17.0](docs/v0.17.0.md).
 
 v0.16.1 corregeix el canvi entre mode simple i avançat, recupera la versió i «by gmuntal» a la capçalera, compacta la navegació inferior i centralitza el versionat de la memòria cau PWA. No modifica APIs, SQLite, dades, captura ni control tèrmic. [Notes v0.16.1](docs/v0.16.1.md).
 

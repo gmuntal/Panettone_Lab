@@ -46,6 +46,25 @@ class AppTests(unittest.TestCase):
         response=self.client.get('/api/growth/sequence?fermentation_id=999')
         self.assertEqual(response.status_code,404);self.assertEqual(response.headers['Cache-Control'],'no-store')
 
+    def test_session_chart_readings_are_bounded_by_time_and_fermentation(self):
+        from datetime import datetime, timedelta, timezone
+        from urllib.parse import urlencode
+        from app.database import add_reading, end_fermentation, start_fermentation
+        first = start_fermentation({})
+        add_reading(26.1, 61.0)
+        end_fermentation(first['id'])
+        second = start_fermentation({})
+        add_reading(27.2, 58.0)
+        self.client.post('/login', data={'username':'tester','password':'correct-horse-battery-staple'})
+        start = (datetime.now(timezone.utc)-timedelta(minutes=2)).isoformat()
+        end = (datetime.now(timezone.utc)+timedelta(minutes=2)).isoformat()
+        query = urlencode({'start':start,'end':end,'fermentation_id':first['id']})
+        response = self.client.get('/api/readings?'+query)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual([row['fermentation_id'] for row in response.json],[first['id']])
+        self.assertEqual(response.json[0]['temperature_c'],26.1)
+        self.assertEqual(second['id'],first['id']+1)
+
     def test_dashboard_and_api_require_login(self):
         self.assertEqual(self.client.get("/").status_code, 302)
         self.assertEqual(self.client.get("/api/state").status_code, 401)

@@ -68,6 +68,20 @@ class CameraUiAssetTests(unittest.TestCase):
         self.assertIn("Darrera captura antiga", javascript)
         self.assertIn("l’últim intent ha fallat", javascript)
 
+    def test_unified_session_chart_and_photo_timeline_use_versioned_state(self):
+        html = (ROOT / "app/templates/dashboard.html").read_text()
+        worker = (ROOT / "app/static/service-worker.js").read_text()
+        javascript = (ROOT / "app/static/app.js").read_text()
+        self.assertIn('chart-state.js?v={{ app_version }}', html)
+        self.assertIn('/static/chart-state.js?v=${VERSION}', worker)
+        for identifier in ('chart-session','simple-photo-timeline','simple-photo-latest','chart-tooltip-close'):
+            self.assertIn(f'id="{identifier}"', html)
+        self.assertIn('data-chart-series="growth"', html)
+        self.assertIn("window.addEventListener('pageshow',refreshOnForeground)", javascript)
+        self.assertIn("document.addEventListener('visibilitychange'", javascript)
+        self.assertIn('fermentation_id=${encodeURIComponent(session.id)}', javascript)
+        self.assertIn("simplePhotoRows[simplePhotoIndex]", javascript)
+
     def test_mobile_dashboard_uses_one_column_and_touch_sized_controls(self):
         css = (ROOT / "app/static/app.css").read_text()
         self.assertIn(".metrics{grid-template-columns:minmax(0,1fr);gap:8px}", css)
@@ -117,6 +131,7 @@ class CameraUiAssetTests(unittest.TestCase):
     def test_frontend_regressions_in_node(self):
         subprocess.run(["node", "--test", str(ROOT / "tests/camera_state.test.js"),
                         str(ROOT / "tests/probe-chart.test.js"),
+                        str(ROOT / "tests/chart_state.test.js"),
                         str(ROOT / "tests/dashboard-state.test.js"),
                         str(ROOT / "tests/theme.test.js")],
                        check=True, cwd=ROOT, capture_output=True, text=True)
