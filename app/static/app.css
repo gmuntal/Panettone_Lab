@@ -127,7 +127,8 @@ html{min-height:100%}body{min-height:100vh;min-height:100dvh}
 .manual-editor{display:grid;gap:8px;padding:10px;border:1px solid #dce9df;border-radius:10px;background:#f7faf7}
 .manual-editor[hidden]{display:none}.manual-editor>p{margin:0;font-size:10px;line-height:1.45;color:var(--muted)}
 .manual-editor output{font-size:11px;font-weight:700;color:var(--green)}.manual-editor-actions{display:flex;gap:7px;flex-wrap:wrap}
-.manual-surface-line{position:absolute;left:0;right:0;top:50%;height:28px;transform:translateY(-50%);padding:0;border:0;border-top:3px solid #f3c84a;background:transparent;touch-action:none;cursor:ns-resize;z-index:4}
+.manual-surface-line{position:absolute;left:0;right:0;top:50%;height:28px;transform:translateY(-50%);padding:0;border:0;background:transparent;touch-action:none;cursor:ns-resize;z-index:4}
+.manual-surface-line:before{content:"";position:absolute;left:0;right:0;top:50%;border-top:3px solid #f3c84a;transform:translateY(-50%);pointer-events:none}
 .manual-surface-line:after{content:"Arrossega la superfície";position:absolute;right:6px;top:4px;padding:4px 7px;border-radius:5px;background:#173630dd;color:#fff;font:600 10px system-ui;white-space:nowrap}
 .manual-surface-line[hidden]{display:none}
 .timeline-markers{display:flex;gap:6px;overflow-x:auto;padding:3px 0 8px;scrollbar-width:thin;overscroll-behavior-inline:contain}

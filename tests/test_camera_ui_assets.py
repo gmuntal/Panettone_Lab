@@ -74,8 +74,11 @@ class CameraUiAssetTests(unittest.TestCase):
         javascript = (ROOT / "app/static/app.js").read_text()
         self.assertIn('chart-state.js?v={{ app_version }}', html)
         self.assertIn('/static/chart-state.js?v=${VERSION}', worker)
-        for identifier in ('chart-session','simple-photo-timeline','simple-photo-latest','chart-tooltip-close'):
+        for identifier in ('chart-session','simple-photo-timeline','chart-tooltip-close'):
             self.assertIn(f'id="{identifier}"', html)
+        self.assertNotIn('id="simple-photo-latest"', html)
+        self.assertNotIn('Evolució de les fotografies', html)
+        self.assertNotIn('Les escales són diferents', html)
         self.assertIn('data-chart-series="growth"', html)
         self.assertIn("window.addEventListener('pageshow',refreshOnForeground)", javascript)
         self.assertIn("document.addEventListener('visibilitychange'", javascript)

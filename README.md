@@ -1,4 +1,6 @@
-# Panettone Lab v0.17.0
+# Panettone Lab v0.17.1
+
+v0.17.1 corregeix la càrrega de dades en canviar la fermentació seleccionada, elimina textos i accions redundants de la cronologia de fotos, afegeix una línia de cursor al gràfic i alinea la correcció manual de superfície amb la posició desada. No modifica APIs, SQLite, dades, càlibratge emmagatzemat ni control tèrmic. [Notes v0.17.1](docs/v0.17.1.md).
 
 v0.17.0 uneix en una sola gràfica la temperatura de cambra, la temperatura de massa, la humitat i el creixement visual fiable; afegeix selecció explícita de fermentació, cronologia temporal de fotos, sincronització foto/gràfic i refresc en reobrir la PWA. Les consultes de gràfic només llegeixen dades de la sessió seleccionada. No modifica SQLite, dades, calibratges ni control tèrmic. [Notes v0.17.0](docs/v0.17.0.md).
 

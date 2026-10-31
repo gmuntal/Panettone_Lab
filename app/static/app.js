@@ -15,6 +15,8 @@ let simpleGrowthState = null;
 let fermenterHistoryCache = {readings:[],actions:[]};
 let fermentationsCache = [];
 let readingsCache = [];
+let chartAmbientRows = [];
+let chartProbeRows = [];
 let probeReadingsCache = [];
 let lastKnownProbeReading = null;
 let lastKnownReading = null;
@@ -42,7 +44,7 @@ let cameraSelectionGeneration=0;
 let vesselCalibration=null,finalPinned=false,playbackEndId=null,currentImageReady=false,currentImageSequence=0;
 let manualSurfaceDraft=null,manualSurfaceDragging=false,wizardCameraReturn=false;
 let simplePhotoRows=[],simplePhotoIndex=-1,lastChartPoints=[],chartGrowthRows=[],chartSessionDomain=null;
-let simplePhotoFollowsLatest=true,simplePhotoRefreshPromise=null,simplePhotoSessionId=null,chartSessionId='active',chartTooltipPinned=false,chartKeyboardTime=null,lastChartDomain=[0,1];
+let simplePhotoFollowsLatest=true,simplePhotoRefreshPromise=null,simplePhotoSessionId=null,chartSessionId='active',chartTooltipPinned=false,chartKeyboardTime=null,lastChartDomain=[0,1],chartCursorTime=null,chartRefreshSequence=0;
 let autoOpenedChartSessionId=null,foregroundRefreshTimer=null;
 const chartSeriesVisible={ambient:true,dough:true,humidity:true,growth:true};
 
@@ -105,7 +107,6 @@ function renderSimpleDashboard(){
   slider.max=String(visiblePhotoRows.length?Date.parse(visiblePhotoRows.at(-1).captured_at):0);slider.step='1000';slider.disabled=visiblePhotoRows.length<2;
   if(simplePhotoIndex>=0&&visiblePhotoRows[simplePhotoIndex])slider.value=String(Date.parse(visiblePhotoRows[simplePhotoIndex].captured_at));
   $('simple-photo-timeline-label').textContent=photo?`${fmtTime(photo.captured_at)}${visiblePhotoRows.length?` · ${simplePhotoIndex+1}/${visiblePhotoRows.length}`:''}`:'—';
-  $('simple-photo-latest').hidden=simplePhotoFollowsLatest||!visiblePhotoRows.length||simplePhotoIndex===visiblePhotoRows.length-1;
   if(finished){$('simple-finished-duration').textContent=`Durada: ${durationBetween(finished.started_at,finished.ended_at||Date.now())}`;const facts=$('simple-finished-facts');facts.replaceChildren();const entries=[];if(kind)entries.push(['Què hem fermentat',kind]);if(finished.initial_ph!==null&&finished.initial_ph!==undefined)entries.push(['pH inicial registrat',`${Number(finished.initial_ph).toFixed(2)}`]);const phEvents=(finished.events||[]).filter(event=>event.ph!==null&&event.ph!==undefined),lastPh=phEvents.at(-1);if(lastPh)entries.push(['Darrer pH registrat',`${Number(lastPh.ph).toFixed(2)}`]);if(finished.initial_dough_temp_c!==null&&finished.initial_dough_temp_c!==undefined)entries.push(['Temperatura inicial de la massa',`${Number(finished.initial_dough_temp_c).toFixed(1)} °C`]);const doughEvents=(finished.events||[]).filter(event=>event.dough_temp_c!==null&&event.dough_temp_c!==undefined),lastDough=doughEvents.at(-1);if(lastDough)entries.push(['Darrera temperatura de la massa',`${Number(lastDough.dough_temp_c).toFixed(1)} °C`]);for(const [name,value] of entries){const row=document.createElement('p');row.textContent=`${name}: ${value}`;facts.append(row);}if(!entries.length){const row=document.createElement('p');row.textContent='No hi ha més mesures registrades per mostrar.';facts.append(row);}}
 }
 
@@ -156,27 +157,37 @@ function updateChartSessionOptions(){
   select.value=chartSessionId;
 }
 async function refreshUnifiedChart(){
-  const session=chartSession(),range=$('range').value;
-  chartGrowthRows=[];chartSessionDomain=null;
-  if(!session){drawChart(readingsCache);return;}
+  const request=++chartRefreshSequence,session=chartSession(),range=$('range').value;
+  chartGrowthRows=[];chartAmbientRows=[];chartProbeRows=[];chartSessionDomain=null;chartCursorTime=null;
+  chartTooltipPinned=false;$('chart-tooltip').hidden=true;
+  if(!session){drawChart([]);$('chart-empty').textContent='Selecciona una fermentació per veure’n l’evolució.';return;}
   const start=session.started_at,end=session.ended_at||new Date().toISOString();
   const sessionStart=Date.parse(start),sessionEnd=Date.parse(end);
   const visibleStart=range==='fermentation'?start:new Date(Math.max(sessionStart,Date.now()-Number(range)*3600000)).toISOString();
   chartSessionDomain=range==='fermentation'?session:null;
-  try{
-    const [growth,ambient,probeRows]=await Promise.all([
-      json(`/api/growth/sequence?fermentation_id=${encodeURIComponent(session.id)}`),
-      json(`/api/readings?start=${encodeURIComponent(visibleStart)}&end=${encodeURIComponent(end)}&fermentation_id=${encodeURIComponent(session.id)}`),
-      json(`/api/probe/readings?start=${encodeURIComponent(visibleStart)}&end=${encodeURIComponent(end)}&fermentation_id=${encodeURIComponent(session.id)}`)
-    ]);
-    chartGrowthRows=window.PanettoneChartState.growthPoints(growth.frames||[]);
-    readingsCache=ambient||[];probeReadingsCache=probeRows||[];
+  const growthRequest=json(`/api/growth/sequence?fermentation_id=${encodeURIComponent(session.id)}`)
+    .then(data=>({data})).catch(error=>({error}));
+  const [ambientResult,probeResult]=await Promise.allSettled([
+    json(`/api/readings?start=${encodeURIComponent(visibleStart)}&end=${encodeURIComponent(end)}&fermentation_id=${encodeURIComponent(session.id)}`),
+    json(`/api/probe/readings?start=${encodeURIComponent(visibleStart)}&end=${encodeURIComponent(end)}&fermentation_id=${encodeURIComponent(session.id)}`)
+  ]);
+  if(request!==chartRefreshSequence)return;
+  if(ambientResult.status==='fulfilled')chartAmbientRows=ambientResult.value||[];
+  else if(ambientResult.reason?.message!=='Sessió caducada')console.warn('No s’han pogut carregar les lectures ambientals de la fermentació seleccionada',ambientResult.reason);
+  if(probeResult.status==='fulfilled')chartProbeRows=probeResult.value||[];
+  else if(probeResult.reason?.message!=='Sessió caducada')console.warn('No s’han pogut carregar les lectures de la sonda de la fermentació seleccionada',probeResult.reason);
+  drawChart(chartAmbientRows);
+  const growthResult=await growthRequest;
+  if(request!==chartRefreshSequence)return;
+  if(growthResult.error){if(growthResult.error.message!=='Sessió caducada')console.warn('No s’ha pogut actualitzar el creixement del gràfic',growthResult.error);}
+  else{
+    chartGrowthRows=window.PanettoneChartState.growthPoints(growthResult.data.frames||[]);
     const low=Date.parse(visibleStart),high=sessionEnd;
     chartGrowthRows=chartGrowthRows.filter(point=>Date.parse(point.captured_at)>=low&&Date.parse(point.captured_at)<=high);
-  }catch(error){chartGrowthRows=[];if(error.message!=='Sessió caducada')console.warn('No s’ha pogut actualitzar el creixement del gràfic',error);}
-  drawChart(readingsCache);
+  }
+  drawChart(chartAmbientRows);
   if(currentUiMode()==='simple'&&activeFermentation&&String(chartSession()?.id)===String(activeFermentation.id)&&autoOpenedChartSessionId!==String(activeFermentation.id)){
-    const history=$('home-history-details');if(history){history.open=true;autoOpenedChartSessionId=String(activeFermentation.id);requestAnimationFrame(()=>drawChart(readingsCache));}
+    const history=$('home-history-details');if(history){history.open=true;autoOpenedChartSessionId=String(activeFermentation.id);requestAnimationFrame(()=>drawChart(chartAmbientRows));}
   }
 }
 
@@ -289,7 +300,7 @@ function showPage(name,writeHistory=true){
   document.querySelectorAll(`[data-mode-nav="${currentUiMode()}"]`).forEach(button=>{const selected=button.dataset.view===selectedView;button.classList.toggle('is-active',selected);if(selected)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
   if(valid==='fermentations'&&currentUiMode()==='simple')document.querySelector('[data-fermentation-tab="archive"]')?.click();
   if(writeHistory)history.replaceState(null,'',`#${valid}`);
-  if(valid==='home')drawChart(readingsCache);
+  if(valid==='home')drawChart(chartAmbientRows);
   if(valid==='fermenter'&&fermenterHistoryCache.readings.length)drawFermenterChart(fermenterHistoryCache.readings,fermenterHistoryCache.actions,Number($('fermenter-form').elements.target_c.value));
   if(valid==='camera'){drawGrowthChart(growthHistoryCache);void refreshCamera();}
   if(valid==='settings'){void refreshResources();void refreshPushState();}
@@ -307,7 +318,7 @@ window.addEventListener('panettone:modechange',syncUiMode);
 
 window.addEventListener('panettone:themechange',()=>{
   const page=document.querySelector('[data-page]:not([hidden])')?.dataset.page;
-  if(page==='home')drawChart(readingsCache);
+  if(page==='home')drawChart(chartAmbientRows);
   else if(page==='camera')drawGrowthChart(growthHistoryCache);
   else if(page==='fermenter'&&fermenterHistoryCache.readings.length)
     drawFermenterChart(fermenterHistoryCache.readings,fermenterHistoryCache.actions,Number($('fermenter-form').elements.target_c.value));
@@ -371,7 +382,7 @@ if(document.addEventListener)document.addEventListener('click',async event=>{
 });
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>showPage(button.dataset.view)));
 document.getElementById('home-history-details')?.addEventListener('toggle',event=>{
-  if(event.currentTarget.open) requestAnimationFrame(()=>drawChart(readingsCache));
+  if(event.currentTarget.open) requestAnimationFrame(()=>drawChart(chartAmbientRows));
 });
 document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>{
   showPage(button.dataset.go);
@@ -400,7 +411,7 @@ function drawChart(rows) {
   const sessionStart=chartSessionDomain?Date.parse(chartSessionDomain.started_at):null,sessionEnd=chartSessionDomain?Date.parse(chartSessionDomain.ended_at||Date.now()):null;
   const inSession=row=>!chartSessionDomain||(Date.parse(row.captured_at)>=sessionStart&&Date.parse(row.captured_at)<=sessionEnd);
   const ambient=rows.filter(row=>Number.isFinite(Date.parse(row.captured_at))&&inSession(row));
-  const dough=probeReadingsCache.filter(row=>Number.isFinite(Date.parse(row.captured_at))&&inSession(row));
+  const dough=chartProbeRows.filter(row=>Number.isFinite(Date.parse(row.captured_at))&&inSession(row));
   const validRows=(data,key)=>data.filter(row=>row.sensor_ok&&Number.isFinite(Number(row[key]))&&row[key]!==null);
   const ambientTemp=chartSeriesVisible.ambient?validRows(ambient,'temperature_c'):[],doughTemp=chartSeriesVisible.dough?validRows(dough,'temperature_c'):[],humidity=chartSeriesVisible.humidity?validRows(ambient,'humidity_rh'):[];
   const growth=chartSeriesVisible.growth?chartGrowthRows.filter(inSession):[];
@@ -411,7 +422,7 @@ function drawChart(rows) {
   $('chart-empty').textContent=!Object.values(chartSeriesVisible).some(Boolean)?'Activa almenys una sèrie per veure les dades.':(rows.length||dough.length)?'No hi ha cap valor vàlid de sensor en aquest període.':'Encara no hi ha lectures en aquest període.';
   $('chart-empty').style.display=hasData?'none':'grid';
   renderChartTable(ambientTemp,doughTemp,humidity,growth);
-  if(!hasData)return;
+  if(!hasData){lastChartDomain=[0,1];return;}
   const bounds=(values,pad,fallback)=>values.length?[Math.floor(Math.min(...values)-pad),Math.ceil(Math.max(...values)+pad)]:fallback;
   const [tMin,tMax]=bounds(temperatures,1,[0,1]),[hMin,hMax]=bounds(humidities,5,[0,1]);
   const times=all.map(row=>Date.parse(row.captured_at));
@@ -448,6 +459,11 @@ function drawChart(rows) {
     growth.forEach(row=>{const time=Date.parse(row.captured_at);if(previous!==null&&time-previous>maxGap)started=false;const x=p.l+(w-p.l-p.r)*plot(time,first,last),y=p.t+(h-p.t-p.b)*(1-plot(row.factor,growthMin,growthMax));if(started)ctx.lineTo(x,y);else ctx.moveTo(x,y);started=true;previous=time;});ctx.stroke();
     ctx.fillStyle=cssToken('--chart-growth','#8056a8');for(const row of growth){ctx.beginPath();ctx.arc(p.l+(w-p.l-p.r)*plot(Date.parse(row.captured_at),first,last),p.t+(h-p.t-p.b)*(1-plot(row.factor,growthMin,growthMax)),2.5,0,Math.PI*2);ctx.fill();}
   }
+  if(chartCursorTime!==null&&!$('chart-tooltip').hidden&&Number.isFinite(chartCursorTime)){
+    const cursorX=p.l+(w-p.l-p.r)*plot(Math.max(first,Math.min(last,chartCursorTime)),first,last);
+    ctx.save();ctx.strokeStyle=cssToken('--chart-cursor','#526e62');ctx.lineWidth=1.5;ctx.setLineDash([4,3]);
+    ctx.beginPath();ctx.moveTo(cursorX,p.t);ctx.lineTo(cursorX,h-p.b);ctx.stroke();ctx.restore();
+  }
   ctx.fillStyle=cssToken('--chart-label','#74837e');
   if(chartSessionDomain){const totalHours=Math.max(0,(last-first)/3600000),step=Math.max(1,Math.ceil(totalHours/Math.max(2,Math.floor((w-p.l-p.r)/48))));for(let hour=0;hour<=totalHours;hour+=step){const x=p.l+(w-p.l-p.r)*hour/Math.max(totalHours,1);ctx.fillText(`${hour} h`,Math.min(w-p.r-25,x),h-4);}}
   else{const label=time=>new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(time));ctx.fillText(label(first),p.l,h-4);ctx.fillText(label(last),Math.max(p.l,w-p.r-35),h-4);}
@@ -455,17 +471,18 @@ function drawChart(rows) {
 
 document.querySelectorAll('[data-chart-series]').forEach(button=>button.addEventListener('click',()=>{
   const key=button.dataset.chartSeries;chartSeriesVisible[key]=!chartSeriesVisible[key];
-  button.setAttribute('aria-pressed',String(chartSeriesVisible[key]));button.classList.toggle('is-muted',!chartSeriesVisible[key]);drawChart(readingsCache);
+  button.setAttribute('aria-pressed',String(chartSeriesVisible[key]));button.classList.toggle('is-muted',!chartSeriesVisible[key]);drawChart(chartAmbientRows);
 }));
 $('chart').addEventListener('pointermove',event=>{if(event.pointerType==='touch'){chartTooltipPinned=true;showChartTooltipAt(event,true);}else showChartTooltipAt(event,false);});
 $('chart').addEventListener('pointerdown',event=>{chartTooltipPinned=event.pointerType==='touch';showChartTooltipAt(event,true);});
-$('chart').addEventListener('pointerleave',()=>{if(!chartTooltipPinned)$('chart-tooltip').hidden=true;});
-$('chart').addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Escape'].includes(event.key))return;event.preventDefault();if(event.key==='Escape'){$('chart-tooltip').hidden=true;chartTooltipPinned=false;return;}if(!lastChartPoints.length)return;chartKeyboardTime=chartKeyboardTime??lastChartDomain[0];chartKeyboardTime=Math.max(lastChartDomain[0],Math.min(lastChartDomain[1],chartKeyboardTime+(event.key==='ArrowRight'?60000:-60000)));chartTooltipPinned=true;showChartTooltipTime(chartKeyboardTime,true);});
-$('chart-tooltip-close').addEventListener('click',()=>{$('chart-tooltip').hidden=true;chartTooltipPinned=false;});
-document.addEventListener('pointerdown',event=>{if(!event.target.closest('.chart-wrap')){chartTooltipPinned=false;$('chart-tooltip').hidden=true;}});
+$('chart').addEventListener('pointerleave',()=>{if(!chartTooltipPinned){$('chart-tooltip').hidden=true;chartCursorTime=null;drawChart(chartAmbientRows);}});
+$('chart').addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Escape'].includes(event.key))return;event.preventDefault();if(event.key==='Escape'){$('chart-tooltip').hidden=true;chartTooltipPinned=false;chartCursorTime=null;drawChart(chartAmbientRows);return;}if(!lastChartPoints.length)return;chartKeyboardTime=chartKeyboardTime??lastChartDomain[0];chartKeyboardTime=Math.max(lastChartDomain[0],Math.min(lastChartDomain[1],chartKeyboardTime+(event.key==='ArrowRight'?60000:-60000)));chartTooltipPinned=true;showChartTooltipTime(chartKeyboardTime,true);});
+$('chart-tooltip-close').addEventListener('click',()=>{$('chart-tooltip').hidden=true;chartTooltipPinned=false;chartCursorTime=null;drawChart(chartAmbientRows);});
+document.addEventListener('pointerdown',event=>{if(!event.target.closest('.chart-wrap')){chartTooltipPinned=false;$('chart-tooltip').hidden=true;chartCursorTime=null;drawChart(chartAmbientRows);}});
 function showChartTooltipAt(event,syncPhoto){const rect=$('chart').getBoundingClientRect(),ratio=Math.max(0,Math.min(1,(event.clientX-rect.left-48)/(rect.width-48-58)));showChartTooltipTime(lastChartDomain[0]+(lastChartDomain[1]-lastChartDomain[0])*ratio,syncPhoto);}
 function showChartTooltipTime(target,syncPhoto=false){
   if(!lastChartPoints.length)return;
+  chartCursorTime=target;
   const groups=['Cambra','Massa','Humitat','Creixement'],maxDeltas={Cambra:90000,Massa:180000,Humitat:90000,Creixement:180000};
   const chosen=[];
   for(const name of groups){const candidates=lastChartPoints.filter(point=>point.series===name).map(point=>({...point,delta:Math.abs(Date.parse(point.row.captured_at)-target)})).sort((a,b)=>a.delta-b.delta);const point=candidates[0];
@@ -480,6 +497,7 @@ function showChartTooltipTime(target,syncPhoto=false){
   if(!chosen.length){const empty=document.createElement('span');empty.textContent='No hi ha mostres a prop d’aquest instant.';content.append(empty);}
   if(photo){const photoTime=document.createElement('span');photoTime.className='chart-tooltip-photo';photoTime.textContent=`Foto més propera ${fmtTime(photo.captured_at)}`;content.append(photoTime);}
   $('chart-tooltip').hidden=false;
+  drawChart(chartAmbientRows);
 }
 
 function renderChartTable(ambientTemp,doughTemp,humidity,growth=[]){
@@ -518,7 +536,7 @@ async function refreshProbe(){
       :(probeLabels[status.state]||'Sonda no disponible');
     if(!$('probe-form').dataset.dirty){$('probe-enabled').checked=status.config.enabled;$('probe-url').value=status.config.url;}
     $('probe-config-status').textContent=status.config.token_configured?'Token de lectura configurat al servidor':'Cal configurar DOUGH_PROBE_TOKEN al servidor';
-    drawChart(readingsCache);
+    drawChart(chartAmbientRows);
   }catch(error){if(sequence===probeRefreshSequence){renderProbeTemperature(lastKnownProbeReading?.temperature_c??null);$('dough-temperature-status').textContent=lastKnownProbeReading?`Darrera lectura vàlida · ${fmtTime(lastKnownProbeReading.captured_at)} · ${ageText(lastKnownProbeReading.captured_at)} · no s’ha pogut actualitzar`:'No s’ha pogut consultar la sonda';}}
   finally{clearTimeout(timeout);}
 }
@@ -816,7 +834,6 @@ async function stepSimplePhoto(delta){
 $('simple-photo-previous').addEventListener('click',()=>void stepSimplePhoto(-1));
 $('simple-photo-next').addEventListener('click',()=>void stepSimplePhoto(1));
 $('simple-photo-timeline').addEventListener('input',event=>{const photo=window.PanettoneChartState.nearest(simplePhotoRows,new Date(Number(event.currentTarget.value)).toISOString());if(photo)simplePhotoIndex=simplePhotoRows.findIndex(row=>String(row.id)===String(photo.id));simplePhotoFollowsLatest=simplePhotoIndex===simplePhotoRows.length-1;renderSimpleDashboard();});
-$('simple-photo-latest').addEventListener('click',()=>{if(!simplePhotoRows.length)return;simplePhotoIndex=simplePhotoRows.length-1;simplePhotoFollowsLatest=true;renderSimpleDashboard();});
 $('simple-camera-image').addEventListener('click',()=>{$('photo-fullscreen-image').src=$('simple-camera-image').src;$('photo-fullscreen-dialog').showModal();});
 $('simple-photo-expand').addEventListener('click',()=>{$('photo-fullscreen-image').src=$('simple-camera-image').src;$('photo-fullscreen-dialog').showModal();});
 $('photo-fullscreen-close').addEventListener('click',()=>$('photo-fullscreen-dialog').close());
@@ -1167,8 +1184,8 @@ $('calibration-reset').addEventListener('click',async()=>{
 $('camera-fermentation').addEventListener('change',event=>selectCameraFermentation(event.currentTarget.value));
 $('photo-latest').addEventListener('click',()=>{if(!photoLibrary.length)return;stopPlayback();finalPinned=false;playbackEndId=null;selectPhoto(photoLibrary.at(-1).id,{manual:false});});
 
-$('range').addEventListener('change',refresh);
-$('chart-session').addEventListener('change',event=>{chartSessionId=event.currentTarget.value;void refresh();});
+$('range').addEventListener('change',()=>void refreshUnifiedChart());
+$('chart-session').addEventListener('change',event=>{chartSessionId=event.currentTarget.value;void refreshUnifiedChart();});
 $('photo-sampling').addEventListener('change',()=>renderPhotoLibrary(allPhotos));
 $('timelapse-speed').addEventListener('change',()=>{if(timelapseTimer){stopPlayback();playTimelapse();}});
 let timer;
