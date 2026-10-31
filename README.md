@@ -1,4 +1,6 @@
-# Panettone Lab v0.16.0
+# Panettone Lab v0.16.1
+
+v0.16.1 corregeix el canvi entre mode simple i avançat, recupera la versió i «by gmuntal» a la capçalera, compacta la navegació inferior i centralitza el versionat de la memòria cau PWA. No modifica APIs, SQLite, dades, captura ni control tèrmic. [Notes v0.16.1](docs/v0.16.1.md).
 
 v0.16.0 compacta la vista simple, fa protagonista la fotografia sense deformar-la, permet recórrer captures, obrir-les a pantalla completa i entrar a «Ajustar detecció». La gràfica combina cambra, massa i humitat amb llegenda interactiva i consulta de valors. En iniciar des del mode simple, activa el seguiment automàtic si encara estava aturat; no altera la lògica de sensors, sessions, calibratge, dades ni control tèrmic. [Notes v0.16.0](docs/v0.16.0.md).
 

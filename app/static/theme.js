@@ -51,6 +51,12 @@
     return true;
   }
 
+  function syncModeControl() {
+    const select = document.getElementById('ui-mode-preference');
+    if (!select) return;
+    select.value = getMode();
+  }
+
   applyPreference();
   window.PanettoneTheme = { getPreference, setPreference, applyPreference };
   root.dataset.uiMode = getMode();
@@ -67,8 +73,13 @@
   });
   document.addEventListener('DOMContentLoaded', () => {
     const select = document.getElementById('theme-preference');
-    if (!select) return;
-    select.value = getPreference();
-    select.addEventListener('change', () => setPreference(select.value));
+    if (select) {
+      select.value = getPreference();
+      select.addEventListener('change', () => setPreference(select.value));
+    }
+    syncModeControl();
+  });
+  document.addEventListener('change', event => {
+    if (event.target?.id === 'ui-mode-preference') setMode(event.target.value);
   });
 })();

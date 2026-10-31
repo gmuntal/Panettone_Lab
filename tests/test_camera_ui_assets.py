@@ -100,6 +100,19 @@ class CameraUiAssetTests(unittest.TestCase):
         self.assertIn('grid-template-columns: repeat(3,minmax(0,1fr))', css)
         self.assertIn('#page-fermentations .history-item details', css)
 
+    def test_mode_switch_is_delegated_and_mobile_nav_has_one_safe_area_reservation(self):
+        theme = (ROOT / "app/static/theme.js").read_text()
+        app_js = (ROOT / "app/static/app.js").read_text()
+        css = (ROOT / "app/static/app.css").read_text()
+        simple_css = (ROOT / "app/static/simple-mode.css").read_text()
+        self.assertIn("event.target?.id === 'ui-mode-preference'", theme)
+        self.assertIn("panettone:modechange", app_js)
+        self.assertNotIn("$('ui-mode-preference').addEventListener", app_js)
+        self.assertIn("min-height:48px", css)
+        self.assertIn("max(4px,env(safe-area-inset-bottom))", css)
+        self.assertIn("calc(64px + env(safe-area-inset-bottom))", css)
+        self.assertNotIn("calc(88px + env(safe-area-inset-bottom))", simple_css)
+
     @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
     def test_frontend_regressions_in_node(self):
         subprocess.run(["node", "--test", str(ROOT / "tests/camera_state.test.js"),

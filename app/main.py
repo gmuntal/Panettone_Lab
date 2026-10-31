@@ -33,7 +33,7 @@ from . import push
 from . import archiving
 from . import probe
 
-APP_VERSION = "0.16.0"
+APP_VERSION = "0.16.1"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}
@@ -182,13 +182,17 @@ def create_app(start_background=False):
 
     @app.get("/manifest.webmanifest")
     def manifest():
-        response = send_from_directory(app.static_folder, "manifest.webmanifest", mimetype="application/manifest+json")
+        template = (Path(app.static_folder) / "manifest.webmanifest").read_text(encoding="utf-8")
+        response = app.response_class(template.replace("__APP_VERSION__", APP_VERSION),
+                                      mimetype="application/manifest+json")
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return response
 
     @app.get("/service-worker.js")
     def service_worker():
-        response = send_from_directory(app.static_folder, "service-worker.js", mimetype="application/javascript")
+        template = (Path(app.static_folder) / "service-worker.js").read_text(encoding="utf-8")
+        response = app.response_class(template.replace("__APP_VERSION__", APP_VERSION),
+                                      mimetype="application/javascript")
         response.headers["Service-Worker-Allowed"] = "/"
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return response

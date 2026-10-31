@@ -28,6 +28,7 @@ class AppTests(unittest.TestCase):
         database.settings = config.settings
         from app import main
         main.settings = config.settings
+        self.version = main.APP_VERSION
         from app.main import create_app
         self.app = create_app(start_background=False)
         self.client = self.app.test_client()
@@ -60,7 +61,7 @@ class AppTests(unittest.TestCase):
             self.assertIn(section, dashboard.data)
         self.assertIn(b'Panettone Lab,', dashboard.data)
         self.assertIn(b'by gmuntal', dashboard.data)
-        self.assertIn(b'v0.16.0', dashboard.data)
+        self.assertIn(f'v{self.version}'.encode(), dashboard.data)
         self.assertEqual(self.client.get("/api/state").json, {"photo": None, "reading": None})
 
     def test_fermenter_api_is_authenticated_and_explicitly_simulated(self):
@@ -110,7 +111,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.client.get("/healthz").json, {"status": "ok"})
 
     def test_brand_assets_are_public_versioned_and_match_manifest(self):
-        manifest_response = self.client.get("/manifest.webmanifest?v=0.16.0")
+        version = self.version
+        manifest_response = self.client.get(f"/manifest.webmanifest?v={version}")
         self.assertEqual(manifest_response.status_code, 200)
         self.assertIn("no-store", manifest_response.headers["Cache-Control"])
         manifest = json.loads(manifest_response.data)
@@ -119,14 +121,14 @@ class AppTests(unittest.TestCase):
         self.assertEqual(manifest["scope"], "/")
         self.assertEqual({icon["sizes"] for icon in manifest["icons"]}, {"192x192", "512x512"})
         self.assertEqual(next(icon for icon in manifest["icons"] if icon["purpose"] == "maskable")["src"],
-                         "/static/icons/icon-maskable-512.png?v=0.16.0")
+                         f"/static/icons/icon-maskable-512.png?v={version}")
 
         expected = {
-            "/static/icons/apple-touch-icon.png?v=0.16.0": (180, 180),
-            "/static/icons/favicon-32.png?v=0.16.0": (32, 32),
-            "/static/icons/icon-192.png?v=0.16.0": (192, 192),
-            "/static/icons/icon-512.png?v=0.16.0": (512, 512),
-            "/static/icons/icon-maskable-512.png?v=0.16.0": (512, 512),
+            f"/static/icons/apple-touch-icon.png?v={version}": (180, 180),
+            f"/static/icons/favicon-32.png?v={version}": (32, 32),
+            f"/static/icons/icon-192.png?v={version}": (192, 192),
+            f"/static/icons/icon-512.png?v={version}": (512, 512),
+            f"/static/icons/icon-maskable-512.png?v={version}": (512, 512),
         }
         for url, dimensions in expected.items():
             with self.subTest(url=url):
@@ -134,7 +136,7 @@ class AppTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.mimetype, "image/png")
                 self.assertEqual(struct.unpack(">II", response.data[16:24]), dimensions)
-        ico = self.client.get("/static/icons/favicon.ico?v=0.16.0")
+        ico = self.client.get(f"/static/icons/favicon.ico?v={version}")
         self.assertEqual(ico.status_code, 200)
         self.assertEqual(ico.data[:4], b"\x00\x00\x01\x00")
         self.assertEqual(struct.unpack("<H", ico.data[4:6])[0], 3)
@@ -142,29 +144,33 @@ class AppTests(unittest.TestCase):
 
         sw = self.client.get("/service-worker.js")
         self.assertIn("no-store", sw.headers["Cache-Control"])
-        self.assertIn(b"panettone-lab-v0.16.0", sw.data)
-        self.assertIn(b"/static/theme.css?v=0.16.0", sw.data)
-        self.assertIn(b"/static/theme.js?v=0.16.0", sw.data)
-        self.assertIn(b"/static/simple-mode.css?v=0.16.0", sw.data)
+        self.assertIn(f"const VERSION='{version}'".encode(), sw.data)
+        self.assertIn(b"panettone-lab-v${VERSION}", sw.data)
+        self.assertIn(b"/static/theme.css?v=${VERSION}", sw.data)
+        self.assertIn(b"/static/theme.js?v=${VERSION}", sw.data)
+        self.assertIn(b"/static/simple-mode.css?v=${VERSION}", sw.data)
+        self.assertNotIn(b"__APP_VERSION__", sw.data)
+        self.assertNotIn(b"__APP_VERSION__", manifest_response.data)
         login = self.client.get("/login")
-        self.assertIn(b"v0.16.0", login.data)
-        self.assertIn(b"theme.js?v=0.16.0", login.data)
-        self.assertIn(b"theme.css?v=0.16.0", login.data)
+        self.assertIn(f"v{version}".encode(), login.data)
+        self.assertIn(f"theme.js?v={version}".encode(), login.data)
+        self.assertIn(f"theme.css?v={version}".encode(), login.data)
         self.client.post("/login", data={"username": "tester", "password": "correct-horse-battery-staple"})
         dashboard = self.client.get("/")
-        self.assertIn(b"/static/icons/icon-192.png?v=0.16.0", dashboard.data)
-        self.assertIn(b"apple-touch-icon.png?v=0.16.0", dashboard.data)
+        self.assertIn(f"/static/icons/icon-192.png?v={version}".encode(), dashboard.data)
+        self.assertIn(f"apple-touch-icon.png?v={version}".encode(), dashboard.data)
         self.assertIn(b'id="theme-preference"', dashboard.data)
         self.assertIn(b'id="ui-mode-preference"', dashboard.data)
         self.assertIn(b'id="fermentation-wizard"', dashboard.data)
         self.assertIn(b'data-mode-nav="simple"', dashboard.data)
-        self.assertIn(b"theme.css?v=0.16.0", dashboard.data)
-        self.assertIn(b"simple-mode.css?v=0.16.0", dashboard.data)
+        self.assertIn(f"theme.css?v={version}".encode(), dashboard.data)
+        self.assertIn(f"simple-mode.css?v={version}".encode(), dashboard.data)
 
     def test_theme_assets_are_public_and_available(self):
-        for path, marker in (("/static/theme.js?v=0.16.0", b"PanettoneTheme"),
-                             ("/static/theme.css?v=0.16.0", b'data-theme="dark"'),
-                             ("/static/simple-mode.css?v=0.16.0", b'data-ui-mode="simple"')):
+        version = self.version
+        for path, marker in ((f"/static/theme.js?v={version}", b"PanettoneTheme"),
+                             (f"/static/theme.css?v={version}", b'data-theme="dark"'),
+                             (f"/static/simple-mode.css?v={version}", b'data-ui-mode="simple"')):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)

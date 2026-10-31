@@ -245,7 +245,6 @@ function syncUiMode(){
   if(document.querySelector('[data-page="fermentations"]:not([hidden])')&&mode==='simple')document.querySelector('[data-fermentation-tab="archive"]')?.click();
 }
 window.addEventListener('panettone:modechange',syncUiMode);
-$('ui-mode-preference').addEventListener('change',event=>window.PanettoneUI?.setMode(event.currentTarget.value));
 
 window.addEventListener('panettone:themechange',()=>{
   const page=document.querySelector('[data-page]:not([hidden])')?.dataset.page;
@@ -1064,4 +1063,4 @@ $('probe-form').addEventListener('submit',async event=>{
 });
 showPage(location.hash.slice(1),false);refresh();setInterval(refresh,30000);
 setInterval(refreshFermenterOnly,5000);
-if('serviceWorker'in navigator){const version=document.body.dataset.appVersion||'0.16.0';navigator.serviceWorker.register(`/service-worker.js?v=${encodeURIComponent(version)}`,{updateViaCache:'none'}).catch(()=>{});}
+if('serviceWorker'in navigator){const version=document.body.dataset.appVersion;navigator.serviceWorker.register(`/service-worker.js?v=${encodeURIComponent(version)}`,{updateViaCache:'none'}).catch(()=>{});}

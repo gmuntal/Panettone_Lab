@@ -1,19 +1,20 @@
-const CACHE='panettone-lab-v0.16.0';
+const VERSION='__APP_VERSION__';
+const CACHE=`panettone-lab-v${VERSION}`;
 const SHELL=[
   '/login',
-  '/static/app.css?v=0.16.0',
-  '/static/theme.css?v=0.16.0',
-  '/static/simple-mode.css?v=0.16.0',
-  '/static/theme.js?v=0.16.0',
-  '/static/camera-state.js?v=0.16.0',
-  '/static/app.js?v=0.16.0',
-  '/static/icons/apple-touch-icon.png?v=0.16.0',
-  '/static/icons/favicon-32.png?v=0.16.0',
-  '/static/icons/favicon.ico?v=0.16.0',
-  '/static/icons/icon-192.png?v=0.16.0',
-  '/static/icons/icon-512.png?v=0.16.0',
-  '/static/icons/icon-maskable-512.png?v=0.16.0',
-  '/manifest.webmanifest?v=0.16.0'
+  `/static/app.css?v=${VERSION}`,
+  `/static/theme.css?v=${VERSION}`,
+  `/static/simple-mode.css?v=${VERSION}`,
+  `/static/theme.js?v=${VERSION}`,
+  `/static/camera-state.js?v=${VERSION}`,
+  `/static/app.js?v=${VERSION}`,
+  `/static/icons/apple-touch-icon.png?v=${VERSION}`,
+  `/static/icons/favicon-32.png?v=${VERSION}`,
+  `/static/icons/favicon.ico?v=${VERSION}`,
+  `/static/icons/icon-192.png?v=${VERSION}`,
+  `/static/icons/icon-512.png?v=${VERSION}`,
+  `/static/icons/icon-maskable-512.png?v=${VERSION}`,
+  `/manifest.webmanifest?v=${VERSION}`
 ];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('panettone-lab-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
@@ -30,7 +31,7 @@ self.addEventListener('push',event=>{
   let payload={};try{payload=event.data?.json()||{}}catch{}
   const title=payload.title||'Panettone Lab';
   event.waitUntil(self.registration.showNotification(title,{body:payload.body||'Hi ha una actualització.',
-    icon:'/static/icons/icon-192.png?v=0.16.0',badge:'/static/icons/icon-192.png?v=0.16.0',
+    icon:`/static/icons/icon-192.png?v=${VERSION}`,badge:`/static/icons/icon-192.png?v=${VERSION}`,
     tag:payload.tag||payload.category||'panettone-lab',data:{url:payload.url||'/#home'}}));
 });
 self.addEventListener('notificationclick',event=>{

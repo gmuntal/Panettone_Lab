@@ -198,7 +198,7 @@
   :root[data-ui-mode="simple"] .simple-home.has-safety-alert .simple-actions { grid-row: auto; }
   :root[data-ui-mode="simple"] .app-nav { grid-template-columns: repeat(3,minmax(0,1fr)); }
   :root[data-ui-mode="advanced"] .app-nav { grid-template-columns: repeat(4,minmax(0,1fr)); }
-  :root[data-ui-mode="simple"] .app-shell { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+  :root[data-ui-mode="simple"] .app-shell { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
   .simple-home { grid-template-columns: minmax(0,1fr); gap: 10px; }
   .simple-heading { grid-column: 1; margin: 4px 2px 3px; }
   .simple-heading h1 { font-size: 25px; }

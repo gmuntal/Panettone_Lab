@@ -11,14 +11,16 @@ function mount({ dark = false, saved = null, mode = null } = {}) {
   const root = { dataset: {} };
   const meta = { content: '', setAttribute(name, value) { if (name === 'content') this.content = value; } };
   const listeners = {};
+  const dispatched = [];
   const mediaListeners = [];
   const select = { value: '', addEventListener(name, callback) { listeners[`select:${name}`] = callback; } };
+  const modeSelect = { id: 'ui-mode-preference', value: '', addEventListener(name, callback) { listeners[`mode-select:${name}`] = callback; } };
   const domListeners = {};
   const context = vm.createContext({
     document: {
       documentElement: root,
       querySelector: () => meta,
-      getElementById: id => id === 'theme-preference' ? select : null,
+      getElementById: id => id === 'theme-preference' ? select : id === 'ui-mode-preference' ? modeSelect : null,
       addEventListener: (name, callback) => { domListeners[name] = callback; }
     },
     window: {
@@ -28,12 +30,12 @@ function mount({ dark = false, saved = null, mode = null } = {}) {
       },
       matchMedia: () => ({ matches: dark, addEventListener: (name, callback) => mediaListeners.push(callback) }),
       addEventListener: (name, callback) => { listeners[`window:${name}`] = callback; },
-      dispatchEvent: event => { listeners[`window:${event.type}`]?.(event); }
+      dispatchEvent: event => { dispatched.push(event.type); listeners[`window:${event.type}`]?.(event); }
     }
     ,Event
   });
   vm.runInContext(source, context);
-  return { context, root, meta, storage, select, listeners, mediaListeners, domListeners };
+  return { context, root, meta, storage, select, modeSelect, listeners, mediaListeners, domListeners, dispatched };
 }
 
 test('automatic theme follows the system and updates the browser chrome color', () => {
@@ -69,12 +71,22 @@ test('a saved preference is used on the next page load', () => {
   assert.equal(ui.root.dataset.themePreference, 'dark');
 });
 
-test('simple mode is the default and the advanced preference persists locally', () => {
+test('the actual mode selector switches immediately, persists, and restores after reload', () => {
   const ui = mount();
   assert.equal(ui.root.dataset.uiMode, 'simple');
-  assert.equal(ui.context.window.PanettoneUI.setMode('advanced'), true);
+  ui.domListeners.DOMContentLoaded();
+  assert.equal(ui.modeSelect.value, 'simple');
+  ui.modeSelect.value = 'advanced';
+  ui.domListeners.change({ target: ui.modeSelect });
   assert.equal(ui.root.dataset.uiMode, 'advanced');
+  assert.ok(ui.dispatched.includes('panettone:modechange'));
   assert.equal(ui.storage.get('panettone-lab-ui-mode'), 'advanced');
+  assert.equal(mount({ mode: ui.storage.get('panettone-lab-ui-mode') }).root.dataset.uiMode, 'advanced');
+  ui.modeSelect.value = 'simple';
+  ui.domListeners.change({ target: ui.modeSelect });
+  assert.equal(ui.root.dataset.uiMode, 'simple');
+  assert.equal(ui.modeSelect.value, 'simple');
+  assert.equal(ui.storage.get('panettone-lab-ui-mode'), 'simple');
   assert.equal(ui.context.window.PanettoneUI.setMode('unknown'), false);
   assert.equal(mount({ mode: 'advanced' }).root.dataset.uiMode, 'advanced');
 });
