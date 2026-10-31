@@ -9,20 +9,40 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png?v={{ app_version }}">
   <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png?v={{ app_version }}">
   <link rel="icon" href="/static/icons/favicon.ico?v={{ app_version }}">
+  <script src="/static/theme.js?v={{ app_version }}"></script>
   <link rel="stylesheet" href="/static/app.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/theme.css?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/simple-mode.css?v={{ app_version }}">
   <title>Panettone Lab, by gmuntal · v{{ app_version }}</title>
 </head>
 <body>
 <header class="topbar"><a class="brand" href="/"><img class="brand-mark logo" src="/static/icons/icon-192.png?v={{ app_version }}" alt=""><span class="brand-copy"><span>Panettone Lab, <em>by gmuntal</em></span><small class="version">v{{ app_version }}</small></span></a><form action="/logout" method="post"><button class="logout" aria-label="Tanca la sessió">Sortir</button></form></header>
 <main class="container app-shell">
   <nav class="app-nav" aria-label="Seccions de Panettone Lab">
-    <button class="nav-item is-active" type="button" data-view="home" aria-current="page"><span aria-hidden="true">⌂</span><span>Resum</span></button>
-    <button class="nav-item" type="button" data-view="fermentations"><span aria-hidden="true">◷</span><span>Fermentació</span></button>
-    <button class="nav-item" type="button" data-view="fermenter"><span aria-hidden="true">♨</span><span>Temperatura</span></button>
-    <button class="nav-item" type="button" data-view="more"><span aria-hidden="true">⋯</span><span>Eines</span></button>
+    <button class="nav-item is-active" type="button" data-view="home" data-mode-nav="simple" aria-current="page"><span aria-hidden="true">⌂</span><span>Inici</span></button>
+    <button class="nav-item" type="button" data-view="fermentations" data-mode-nav="simple"><span aria-hidden="true">◷</span><span>Històric</span></button>
+    <button class="nav-item" type="button" data-view="settings" data-mode-nav="simple"><span aria-hidden="true">⚙</span><span>Ajustos</span></button>
+    <button class="nav-item is-active" type="button" data-view="home" data-mode-nav="advanced" aria-current="page"><span aria-hidden="true">⌂</span><span>Resum</span></button>
+    <button class="nav-item" type="button" data-view="fermentations" data-mode-nav="advanced"><span aria-hidden="true">◷</span><span>Fermentació</span></button>
+    <button class="nav-item" type="button" data-view="fermenter" data-mode-nav="advanced"><span aria-hidden="true">♨</span><span>Temperatura</span></button>
+    <button class="nav-item" type="button" data-view="more" data-mode-nav="advanced"><span aria-hidden="true">⋯</span><span>Eines</span></button>
   </nav>
   <div class="page-content">
     <section class="page-section is-active" id="page-home" data-page="home">
+      <section class="simple-home" aria-live="polite">
+        <div class="simple-alert" id="simple-safety-alert" role="alert" hidden></div>
+        <header class="simple-heading"><div><p class="eyebrow">PANETTONE LAB</p><h1 id="simple-state-title">Preparat per començar</h1><p class="muted" id="simple-state-message">Quan vulguis, inicia una fermentació.</p></div><span class="simple-session-state" id="simple-session-state">Preparat</span></header>
+        <section class="simple-camera-card" aria-label="Fotografia actual"><img id="simple-camera-image" alt="Fotografia actual de la fermentadora" hidden><div class="simple-camera-placeholder" id="simple-camera-placeholder"><span aria-hidden="true">▣</span><strong>Encara no hi ha cap fotografia</strong><small id="simple-camera-message">Comprova que el registre automàtic estigui actiu.</small></div><p class="simple-photo-time" id="simple-photo-time" hidden></p></section>
+        <section class="simple-facts" aria-label="Estat de la fermentació">
+          <article class="simple-fact temperature-fact"><span>Temperatura de la cambra</span><strong id="simple-ambient-temperature">—</strong><small id="simple-ambient-help">Esperant una lectura</small></article>
+          <article class="simple-fact" id="simple-dough-fact" hidden><span>Temperatura de la massa</span><strong id="simple-dough-temperature">—</strong><small>Lectura de la sonda</small></article>
+          <article class="simple-fact" id="simple-growth-fact" hidden><span>Creixement estimat</span><strong id="simple-growth">—</strong><small id="simple-growth-help">Estimació visual, no una mesura exacta</small></article>
+          <article class="simple-fact" id="simple-elapsed-fact" hidden><span>Temps transcorregut</span><strong id="simple-elapsed">—</strong><small>Des de l’inici d’aquesta fermentació</small></article>
+        </section>
+        <section class="simple-recording" aria-label="Registre automàtic"><span class="recording-dot" id="simple-recording-dot"></span><span id="simple-recording-state">Registre automàtic aturat</span><small id="simple-recording-help">És independent de la fermentació.</small></section>
+        <section class="simple-finished" id="simple-finished" hidden><div class="simple-success-mark" aria-hidden="true">✓</div><h2>Fermentació finalitzada</h2><p id="simple-finished-duration"></p><div class="simple-finished-facts" id="simple-finished-facts"></div><button class="primary-button" id="simple-view-summary" type="button">Veure resum</button></section>
+        <div class="simple-actions"><button class="primary-button" id="simple-start-button" type="button">Iniciar fermentació</button><button class="primary-button" id="simple-finish-button" type="button" hidden>Finalitzar fermentació</button><button class="secondary-button" id="simple-note-button" type="button" hidden>Afegir nota</button><button class="secondary-button" id="simple-new-button" type="button" hidden>Iniciar una altra fermentació</button></div>
+      </section>
       <section class="intro"><div><p class="eyebrow">EL TEU LIEVITO MADRE</p><h1>Resum</h1><p class="muted">El registre automàtic desa lectures i fotos. La fermentació agrupa ingredients i anotacions.</p></div><div class="monitoring-controls"><span class="live paused" id="monitoring-status"><i></i> REGISTRE ATURAT</span><button class="secondary-button" id="monitoring-button" type="button">Inicia registre</button></div></section>
       <section class="dashboard-status" aria-label="Actualització de les dades">
         <span class="data-freshness unknown" id="sensor-freshness" data-interval-seconds="{{ sensor_interval_seconds }}"><i aria-hidden="true"></i><span>Sensor · esperant dades</span></span>
@@ -64,6 +84,7 @@
     </section>
 
     <section class="page-section" id="page-fermentations" data-page="fermentations" hidden>
+      <button class="primary-button advanced-start-button" id="advanced-start-fermentation" type="button">Inicia una fermentació</button>
       <div class="fermentation-tabs" role="tablist" aria-label="Vistes de les fermentacions"><button class="secondary-button is-selected" type="button" role="tab" aria-selected="true" data-fermentation-tab="current">Actual</button><button class="secondary-button" type="button" role="tab" aria-selected="false" data-fermentation-tab="archive">Historial</button></div>
       <div id="fermentation-current" data-fermentation-panel="current">
       <section class="panel active-fermentation-detail" id="active-fermentation-detail">
@@ -97,6 +118,8 @@
     <section class="page-section" id="page-settings" data-page="settings" hidden>
       <section class="panel settings-panel"><div class="panel-heading"><div><p class="eyebrow">PREFERÈNCIES I ESTAT</p><h2>Configuració</h2></div><span class="version-tag">v{{ app_version }}</span></div>
         <div class="settings-grid">
+          <article class="mode-preference-card"><h3>Mode d’ús</h3><p>El mode simple mostra només les accions i dades essencials. El mode avançat manté totes les eines.</p><label for="ui-mode-preference">Interfície</label><select id="ui-mode-preference"><option value="simple">Simple</option><option value="advanced">Avançat</option></select><p class="metric-foot">Canviar de mode no atura ni modifica cap procés.</p></article>
+          <article class="theme-preference-card"><h3>Aparença</h3><p>Tria com vols veure Panettone Lab en aquest dispositiu.</p><label for="theme-preference">Tema</label><select id="theme-preference" aria-describedby="theme-preference-help"><option value="auto">Automàtic · segons el dispositiu</option><option value="light">Clar</option><option value="dark">Fosc</option></select><p id="theme-preference-help" class="metric-foot" role="status">La preferència es desa en aquest navegador.</p></article>
           <article><h3>Captura i sensors</h3><p>Lectures ambientals cada <strong>{{ sensor_interval_seconds }} s</strong>.</p><p>Fotografies cada <strong>{{ photo_interval_seconds }} s</strong> quan el registre automàtic és actiu.</p></article>
           <article><h3>Dispositius locals</h3><p>Shelly Plus UNI · temperatura i humitat ambientals.</p><p>Tapo C210 · fotografies de la fermentadora.</p><p class="muted">Els valors ambientals no són una mesura de la temperatura interna de la massa.</p></article>
           <article><h3>Sonda de temperatura de massa</h3><form id="probe-form" class="data-form"><label class="check-setting"><input id="probe-enabled" type="checkbox"> Activar sonda Wi-Fi</label><label>URL de la sonda<input id="probe-url" type="url" required value="http://10.85.3.103/api/status"></label><button class="secondary-button" type="submit">Desa sonda</button></form><p id="probe-config-status" class="metric-foot" role="status"></p><p class="muted">El token de lectura es configura al servidor. La sonda complementa la lectura ambiental. Activa el registre automàtic per enregistrar dades.</p></article>
@@ -111,6 +134,15 @@
     <footer>Les dades s’actualitzen cada 30 segons mentre el registre automàtic és actiu <span>·</span> Emmagatzematge local SQLite <span>·</span> by gmuntal</footer>
   </div>
 </main>
+<dialog class="simple-dialog" id="fermentation-wizard" aria-labelledby="wizard-title">
+  <form id="simple-fermentation-form" class="wizard-form">
+    <header class="wizard-header"><div><p class="eyebrow" id="wizard-step-label">PAS 1 DE 3</p><h2 id="wizard-title">Què fermentarem?</h2></div><button class="icon-button" type="button" data-wizard-close aria-label="Tanca">×</button></header>
+    <section class="wizard-step" data-wizard-step="1"><p class="wizard-help">Tria l’opció que s’assembla més al que faràs.</p><label class="wizard-field">Què vols fer?<select id="fermentation-kind" name="fermentation_kind"><option value="lievito_madre">Lievito madre</option><option value="first_dough">Primer impasto</option><option value="final_fermentation">Fermentació final</option><option value="other">Una altra fermentació</option></select></label><label class="wizard-field" id="other-kind-field" hidden>Nom de la fermentació<input id="other-kind" type="text" maxlength="80" placeholder="Per exemple, massa de pa"></label><div class="wizard-actions"><button class="primary-button" type="button" data-wizard-next>Continua</button></div></section>
+    <section class="wizard-step" data-wizard-step="2" hidden><p class="wizard-help">Pots deixar els valors suggerits i començar.</p><label class="wizard-field">Temperatura objectiu de la cambra (opcional)<span class="wizard-input-suffix"><input name="target_fermenter_temp_c" type="number" min="15" max="30" step="0.1" value="27"><span>°C</span></span></label><label class="wizard-check"><input name="camera_enabled" type="checkbox" checked><span><strong>Desar fotografies durant aquesta fermentació</strong><small>Les fotografies s’afegeixen a l’historial mentre el registre automàtic és actiu.</small></span></label><details class="wizard-advanced"><summary>Afegir dades avançades (opcional)</summary><div class="wizard-advanced-grid"><label>Massa mare (g)<input name="starter_mass_g" type="number" min="0" step="0.1"></label><label>Farina (g)<input name="flour_g" type="number" min="0" step="0.1"></label><label>Aigua (g)<input name="water_g" type="number" min="0" step="0.1"></label><label>Tipus de farina<input name="flour_type" maxlength="120"></label><label>Hidratació (%)<input name="hydration_pct" type="number" min="0" max="500" step="0.1"></label><label>pH inicial<input name="initial_ph" type="number" min="0" max="14" step="0.01"></label><label>Temperatura inicial de la massa (°C)<input name="initial_dough_temp_c" type="number" min="-20" max="100" step="0.1"></label><label>Nota inicial<input name="notes" maxlength="2000" placeholder="Opcional"></label></div></details><div class="wizard-actions"><button class="secondary-button" type="button" data-wizard-back>Enrere</button><button class="primary-button" type="button" data-wizard-next>Revisa</button></div></section>
+    <section class="wizard-step" data-wizard-step="3" hidden><p class="wizard-help">En iniciar, les lectures i fotografies s’associaran a aquesta fermentació. El control tèrmic no canviarà.</p><dl class="wizard-summary"><div><dt>Fermentació</dt><dd id="wizard-summary-kind"></dd></div><div><dt>Temperatura objectiu</dt><dd id="wizard-summary-target"></dd></div><div><dt>Fotografies</dt><dd id="wizard-summary-camera"></dd></div></dl><p class="wizard-feedback" id="wizard-feedback" role="status" aria-live="polite"></p><div class="wizard-actions"><button class="secondary-button" type="button" data-wizard-back>Enrere</button><button class="primary-button" type="submit">Inicia fermentació</button></div></section>
+  </form>
+</dialog>
+<dialog class="simple-dialog note-dialog" id="simple-note-dialog" aria-labelledby="simple-note-title"><form id="simple-note-form"><header class="wizard-header"><div><p class="eyebrow">FERMENTACIÓ ACTUAL</p><h2 id="simple-note-title">Afegir una nota</h2></div><button class="icon-button" type="button" data-note-close aria-label="Tanca">×</button></header><label class="wizard-field">Què vols recordar?<textarea name="details" rows="4" maxlength="2000" required placeholder="Escriu aquí una observació"></textarea></label><p id="simple-note-feedback" class="wizard-feedback" role="status"></p><div class="wizard-actions"><button class="secondary-button" type="button" data-note-close>Cancel·la</button><button class="primary-button" type="submit">Desa la nota</button></div></form></dialog>
   <script src="/static/camera-state.js?v={{ app_version }}" defer></script>
   <script src="/static/app.js?v={{ app_version }}" defer></script>
 </body>

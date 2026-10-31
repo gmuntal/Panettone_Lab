@@ -17,7 +17,7 @@ function render(ambient, dough) {
   };
   const canvas = {getBoundingClientRect:()=>({width:350,height:210}),getContext:()=>ctx};
   const element = tag => ({tag,children:[],append(...nodes){this.children.push(...nodes);},set textContent(value){this.text=String(value);},get textContent(){return this.text;}});
-  const context = vm.createContext({window:{devicePixelRatio:1},probeReadingsCache:dough,
+  const context = vm.createContext({window:{devicePixelRatio:1},probeReadingsCache:dough,cssToken:(_name,fallback)=>fallback,
     $: id=>id==='chart'?canvas:id==='chart-data-body'?tableBody:empty,
     document:{createElement:element}, Intl, Date, Number, Math});
   vm.runInContext(chart, context);

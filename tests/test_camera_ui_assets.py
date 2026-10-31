@@ -86,11 +86,26 @@ class CameraUiAssetTests(unittest.TestCase):
         self.assertIn(".camera-display-grid{grid-template-columns:1fr}", css)
         self.assertIn(".camera-nav{display:grid;grid-template-columns:1fr 1fr}", css)
 
+    def test_simple_mode_has_three_main_sections_and_hides_technical_home(self):
+        html = (ROOT / "app/templates/dashboard.html").read_text()
+        css = (ROOT / "app/static/simple-mode.css").read_text()
+        for label in ("Inici", "Històric", "Ajustos", "Iniciar fermentació",
+                      "Finalitzar fermentació", "Afegir nota", "Temperatura de la cambra"):
+            self.assertIn(label, html)
+        self.assertIn('id="fermentation-wizard"', html)
+        self.assertIn('id="simple-finished"', html)
+        self.assertIn('role="alert"', html)
+        self.assertIn('data-mode-nav="advanced"', html)
+        self.assertIn('#page-home > :not(.simple-home)', css)
+        self.assertIn('grid-template-columns: repeat(3,minmax(0,1fr))', css)
+        self.assertIn('#page-fermentations .history-item details', css)
+
     @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
     def test_frontend_regressions_in_node(self):
         subprocess.run(["node", "--test", str(ROOT / "tests/camera_state.test.js"),
                         str(ROOT / "tests/probe-chart.test.js"),
-                        str(ROOT / "tests/dashboard-state.test.js")],
+                        str(ROOT / "tests/dashboard-state.test.js"),
+                        str(ROOT / "tests/theme.test.js")],
                        check=True, cwd=ROOT, capture_output=True, text=True)
 
 

@@ -9,6 +9,9 @@ async function json(url, options={}) {
 }
 let freshPreviewUrl = null;
 let activeFermentation = null;
+let justFinishedFermentation = null;
+let simpleGrowthRequest = 0;
+let simpleGrowthState = null;
 let fermenterHistoryCache = {readings:[],actions:[]};
 let fermentationsCache = [];
 let readingsCache = [];
@@ -39,15 +42,68 @@ let cameraSelectionGeneration=0;
 let vesselCalibration=null,finalPinned=false,playbackEndId=null,currentImageReady=false,currentImageSequence=0;
 let manualSurfaceDraft=null,manualSurfaceDragging=false;
 
+function currentUiMode(){return document.documentElement.dataset.uiMode==='advanced'?'advanced':'simple';}
+function prettyFermentationKind(value){return ({lievito_madre:'Lievito madre',first_dough:'Primer impasto',final_fermentation:'Fermentació final',other:'Una altra fermentació'})[value]||value||'Fermentació';}
+function recordedFermentationKind(item){return /^Tipus de fermentació:\s*([^\r\n]+)/mi.exec(item?.notes||'')?.[1]?.trim()||null;}
+function durationBetween(start,end){const seconds=Math.max(0,Math.floor((new Date(end).getTime()-new Date(start).getTime())/1000)),days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60);return days?`${days} d ${hours} h`:`${hours} h ${minutes} min`;}
+function renderSimpleDashboard(){
+  const current=activeFermentation,finished=!current&&justFinishedFermentation;
+  const title=$('simple-state-title'),message=$('simple-state-message');
+  $('simple-finished').hidden=!finished;
+  $('simple-start-button').hidden=Boolean(current||finished);
+  $('simple-finish-button').hidden=!current;
+  $('simple-note-button').hidden=!current;
+  $('simple-new-button').hidden=!finished;
+  $('simple-session-state').textContent=current?'En curs':finished?'Finalitzada':'Preparat';
+  const kind=recordedFermentationKind(current||finished);
+  title.textContent=current?(kind||'Fermentació en curs'):finished?'Ja està!':'Preparat per començar';
+  message.textContent=current?`${kind||'La fermentació'} està en marxa. Aquí tens el seguiment.`:finished?'La fermentació ha acabat. Pots consultar-ne el resum.':'Quan vulguis, inicia una fermentació.';
+  $('simple-elapsed-fact').hidden=!current;
+  if(current){$('simple-elapsed').textContent=elapsedSince(current.started_at);}
+  const sensorFresh=$('sensor-freshness').classList.contains('fresh');
+  const tempText=$('temperature').textContent.replace('°C','').trim();
+  $('simple-ambient-temperature').textContent=sensorFresh&&tempText!=='—'?`${tempText} °C`:'— °C';
+  $('simple-ambient-help').textContent=sensorFresh?'Darrera lectura recent':$('sensor-freshness').classList.contains('stale')?'La darrera lectura és antiga':'Sensor sense lectura disponible';
+  const probeValue=$('dough-temperature').textContent.replace('°C','').trim();
+  const probeFresh=lastKnownProbeReading&&Date.now()-new Date(lastKnownProbeReading.captured_at).getTime()<=120000;
+  $('simple-dough-fact').hidden=!(probeFresh&&probeValue!=='—');
+  $('simple-dough-temperature').textContent=probeFresh?`${probeValue} °C`:'— °C';
+  const growth=simpleGrowthState?.fermentationId===current?.id?simpleGrowthState:null;
+  $('simple-growth-fact').hidden=!(current&&growth?.factor!==null&&Number.isFinite(growth?.factor));
+  if(growth?.factor!==null&&Number.isFinite(growth?.factor)){$('simple-growth').textContent=`×${growth.factor.toLocaleString('ca-ES',{minimumFractionDigits:1,maximumFractionDigits:2})}`;$('simple-growth-help').textContent='Alçada estimada per la càmera; no és una mesura exacta.';}
+  const photo=lastKnownPhoto,photoAge=photo?Date.now()-new Date(photo.captured_at).getTime():Infinity,photoFresh=photoAge<=Math.max(240000,Number($('camera-status').dataset.intervalSeconds||120)*2*1000);
+  const image=$('simple-camera-image'),placeholder=$('simple-camera-placeholder'),stamp=$('simple-photo-time');
+  if(photo?.camera_ok&&photo.filename){image.src=`/photos/${encodeURIComponent(photo.filename)}`;image.hidden=false;placeholder.hidden=true;stamp.hidden=false;stamp.textContent=`${photoFresh?'Darrera fotografia':'Fotografia antiga'} · ${fmtTime(photo.captured_at)}${photoFresh?'':` · ${ageText(photo.captured_at)}`}`;}
+  else{image.removeAttribute('src');image.hidden=true;placeholder.hidden=false;stamp.hidden=true;$('simple-camera-message').textContent=lastPhotoAttempt&&!lastPhotoAttempt.camera_ok?'No hem pogut obtenir una fotografia. Comprova que la càmera està encesa i connectada.':lastMonitoringState?.active?'Esperant la primera fotografia.':'Activa el registre automàtic per començar a desar fotografies.';}
+  const recording=Boolean(lastMonitoringState?.active);
+  $('simple-recording-dot').classList.toggle('is-active',recording);
+  $('simple-recording-state').textContent=recording?'Registre automàtic actiu':'Registre automàtic aturat';
+  $('simple-recording-help').textContent=recording?'Desa lectures i fotografies. És independent de la fermentació.':'La fermentació i el registre són estats diferents.';
+  if(finished){$('simple-finished-duration').textContent=`Durada: ${durationBetween(finished.started_at,finished.ended_at||Date.now())}`;const facts=$('simple-finished-facts');facts.replaceChildren();const entries=[];if(kind)entries.push(['Què hem fermentat',kind]);if(finished.initial_ph!==null&&finished.initial_ph!==undefined)entries.push(['pH inicial registrat',`${Number(finished.initial_ph).toFixed(2)}`]);const phEvents=(finished.events||[]).filter(event=>event.ph!==null&&event.ph!==undefined),lastPh=phEvents.at(-1);if(lastPh)entries.push(['Darrer pH registrat',`${Number(lastPh.ph).toFixed(2)}`]);if(finished.initial_dough_temp_c!==null&&finished.initial_dough_temp_c!==undefined)entries.push(['Temperatura inicial de la massa',`${Number(finished.initial_dough_temp_c).toFixed(1)} °C`]);const doughEvents=(finished.events||[]).filter(event=>event.dough_temp_c!==null&&event.dough_temp_c!==undefined),lastDough=doughEvents.at(-1);if(lastDough)entries.push(['Darrera temperatura de la massa',`${Number(lastDough.dough_temp_c).toFixed(1)} °C`]);for(const [name,value] of entries){const row=document.createElement('p');row.textContent=`${name}: ${value}`;facts.append(row);}if(!entries.length){const row=document.createElement('p');row.textContent='No hi ha més mesures registrades per mostrar.';facts.append(row);}}
+}
+
+async function refreshSimpleGrowth(){
+  const current=activeFermentation;if(!current){simpleGrowthState=null;renderSimpleDashboard();return;}
+  const request=++simpleGrowthRequest;
+  try{const data=await json(`/api/growth/sequence?fermentation_id=${encodeURIComponent(current.id)}`);if(request!==simpleGrowthRequest||activeFermentation?.id!==current.id)return;
+    const frame=(data.frames||[]).slice().reverse().find(item=>{const measurement=item.manual_measurement?.valid?item.manual_measurement:item.measurement;return measurement?.valid&&['correct','manual','manual_reference'].includes(measurement.quality)&&measurement.factor!==null&&measurement.factor!==undefined&&measurement.factor!==''&&Number.isFinite(Number(measurement.factor));});
+    if(frame){const measurement=frame.manual_measurement?.valid?frame.manual_measurement:frame.measurement;simpleGrowthState={fermentationId:current.id,factor:Number(measurement.factor)};}else simpleGrowthState={fermentationId:current.id,factor:null};
+  }catch{if(request===simpleGrowthRequest)simpleGrowthState={fermentationId:current.id,factor:null};}
+  renderSimpleDashboard();
+}
+
 function formPayload(form) {
   return Object.fromEntries([...new FormData(form)].filter(([,value])=>value!==''));
 }
 
 async function refreshFermentation(sequence=null) {
+  const previousActiveId=activeFermentation?.id??null;
   const data=await json('/api/fermentations');
   if(sequence!==null&&sequence!==refreshSequence)return data;
   fermentationsCache=data.items||[];
   activeFermentation=data.active;
+  if(activeFermentation)justFinishedFermentation=null;
+  else if(previousActiveId)justFinishedFermentation=fermentationsCache.find(item=>String(item.id)===String(previousActiveId)&&item.ended_at)||null;
   $('session-status').textContent=activeFermentation
     ? `Fermentació #${activeFermentation.id} en curs des de ${fmtTime(activeFermentation.started_at)}. Les lectures ambientals s’hi associen${activeFermentation.camera_enabled?' i el registre de fotos està actiu.':'; les fotos estan pausades en aquesta fermentació.'}`
     : 'No hi ha cap fermentació en curs. El registre automàtic de lectures i fotos es controla per separat.';
@@ -107,13 +163,15 @@ function renderFermentations(){
   }
   const sort=$('fermentation-sort')?.value||'date';const older=fermentationsCache.filter(item=>item.ended_at).slice().sort((a,b)=>sort==='storage'?(b.storage?.photo_bytes||0)-(a.storage?.photo_bytes||0):sort==='photos'?(b.storage?.available_photos||0)-(a.storage?.available_photos||0):new Date(b.started_at)-new Date(a.started_at)),list=$('fermentation-history');
   $('fermentation-count').textContent=`${older.length} ${older.length===1?'anterior':'anteriors'}`;list.replaceChildren();
-  if(!older.length){const empty=document.createElement('p');empty.className='muted';empty.textContent='Encara no hi ha fermentacions finalitzades guardades.';list.append(empty);return;}
-  older.forEach(item=>{const card=document.createElement('article');card.className='history-item';const head=document.createElement('div');const title=document.createElement('h3');title.textContent=`Fermentació #${item.id}`;const dates=document.createElement('p');dates.textContent=`${new Date(item.started_at).toLocaleString('ca-ES')} – ${new Date(item.ended_at).toLocaleString('ca-ES')}`;head.append(title,dates);const summary=document.createElement('p');const lastPh=(item.events||[]).filter(event=>event.ph!==null).at(-1);summary.textContent=`pH inicial ${item.initial_ph===null?'no registrat':Number(item.initial_ph).toFixed(2)} · darrer pH ${lastPh?Number(lastPh.ph).toFixed(2):'no registrat'} · ${(item.events||[]).filter(event=>event.event_type==='refresh').length} refrescos · ${(item.events||[]).length} anotacions`;
+  if(!older.length){const empty=document.createElement('p');empty.className='muted';empty.textContent='Encara no hi ha fermentacions finalitzades guardades.';list.append(empty);renderSimpleDashboard();if(activeFermentation)void refreshSimpleGrowth();return;}
+  older.forEach(item=>{const card=document.createElement('article');card.className='history-item';const head=document.createElement('div');const title=document.createElement('h3');title.textContent=`${recordedFermentationKind(item)||'Fermentació'} · #${item.id}`;const dates=document.createElement('p');dates.textContent=`${new Date(item.started_at).toLocaleString('ca-ES')} – ${new Date(item.ended_at).toLocaleString('ca-ES')}`;head.append(title,dates);const summary=document.createElement('p');const lastPh=(item.events||[]).filter(event=>event.ph!==null).at(-1);summary.textContent=`pH inicial ${item.initial_ph===null?'no registrat':Number(item.initial_ph).toFixed(2)} · darrer pH ${lastPh?Number(lastPh.ph).toFixed(2):'no registrat'} · ${(item.events||[]).filter(event=>event.event_type==='refresh').length} refrescos · ${(item.events||[]).length} anotacions`;
     const details=document.createElement('details');const label=document.createElement('summary');label.textContent='Mesures i refrescos';const eventList=document.createElement('ol');(item.events||[]).forEach(event=>{const li=document.createElement('li');li.textContent=`${new Date(event.occurred_at).toLocaleString('ca-ES')} · ${eventLabels[event.event_type]||event.event_type}${event.ph!==null?` · pH ${Number(event.ph).toFixed(2)}`:''}${event.details?` · ${event.details}`:''}`;eventList.append(li);});details.append(label,eventList);card.append(head,summary,details);if(!item.archived_at){const exportLink=document.createElement('a');exportLink.className='secondary-button';exportLink.href=`/api/fermentations/${item.id}/export`;exportLink.textContent='Descarrega ZIP complet';card.append(exportLink);}
     const storage=item.storage;if(storage){const usage=document.createElement('p');usage.textContent=`${storage.status} · ${storage.available_photos} fotografies disponibles · ${formatBytes(storage.photo_bytes)} · ${elapsedSince(item.started_at)}`;card.append(usage);}
     if(item.archived_at){const archiveNote=document.createElement('p');archiveNote.textContent=`Arxivada · ${item.archive_saved_bytes?formatBytes(item.archive_saved_bytes)+' alliberats en fotos':''} · mostreig ${item.archive_sample_minutes||30} min`;card.append(archiveNote);if(item.archive_filename){const dl=document.createElement('a');dl.className='secondary-button';dl.href=`/api/fermentations/${item.id}/archive`;dl.textContent='Descarrega ZIP de recuperació';card.append(dl);const remove=document.createElement('button');remove.type='button';remove.className='secondary-button';remove.textContent='Elimina còpia ZIP de la Raspberry';remove.addEventListener('click',async()=>{if(!window.confirm('Elimina la còpia de recuperació de la Raspberry? Continua només si ja has descarregat i comprovat el ZIP al teu dispositiu.'))return;try{await json(`/api/fermentations/${item.id}/archive/remove`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed_download:true})});await refreshFermentation();}catch(error){window.alert(error.message);}});card.append(remove);}}
     if(!item.archived_at)card.append(createPeriodTools(item));
     if(item.archived_at)list.append(card);else card.append(createArchiveTools(item));list.append(card);});
+  renderSimpleDashboard();
+  if(activeFermentation)void refreshSimpleGrowth();
 }
 
 function localDateTimeInput(value){
@@ -156,11 +214,13 @@ function renderArchivePreview(item,plan,container,previewButton,select){
 }
 
 function showPage(name,writeHistory=true){
-  const valid=['home','fermenter','fermentations','camera','settings','more'].includes(name)?name:'home';
+  let valid=['home','fermenter','fermentations','camera','settings','more'].includes(name)?name:'home';
+  if(currentUiMode()==='simple'&&!['home','fermentations','settings'].includes(valid))valid='home';
   if(valid!=='camera'&&timelapseTimer){clearInterval(timelapseTimer);timelapseTimer=null;$('timelapse-toggle').textContent='Reprodueix timelapse';}
   document.querySelectorAll('[data-page]').forEach(section=>{const selected=section.dataset.page===valid;section.hidden=!selected;section.classList.toggle('is-active',selected);});
-  const selectedView=['camera','settings'].includes(valid)?'more':valid;
-  document.querySelectorAll('[data-view]').forEach(button=>{const selected=button.dataset.view===selectedView;button.classList.toggle('is-active',selected);if(selected)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
+  const selectedView=valid==='camera'||(valid==='settings'&&currentUiMode()==='advanced')?'more':valid;
+  document.querySelectorAll(`[data-mode-nav="${currentUiMode()}"]`).forEach(button=>{const selected=button.dataset.view===selectedView;button.classList.toggle('is-active',selected);if(selected)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
+  if(valid==='fermentations'&&currentUiMode()==='simple')document.querySelector('[data-fermentation-tab="archive"]')?.click();
   if(writeHistory)history.replaceState(null,'',`#${valid}`);
   if(valid==='home')drawChart(readingsCache);
   if(valid==='fermenter'&&fermenterHistoryCache.readings.length)drawFermenterChart(fermenterHistoryCache.readings,fermenterHistoryCache.actions,Number($('fermenter-form').elements.target_c.value));
@@ -168,6 +228,24 @@ function showPage(name,writeHistory=true){
   if(valid==='settings'){void refreshResources();void refreshPushState();}
   window.scrollTo({top:0,behavior:'auto'});
 }
+
+function syncUiMode(){
+  const mode=currentUiMode(),select=$('ui-mode-preference');if(select)select.value=mode;
+  const page=document.querySelector('[data-page]:not([hidden])')?.dataset.page;
+  if(mode==='simple'&&!['home','fermentations','settings'].includes(page))showPage('home');
+  else if(mode==='advanced'&&page==='settings')showPage('more');
+  if(document.querySelector('[data-page="fermentations"]:not([hidden])')&&mode==='simple')document.querySelector('[data-fermentation-tab="archive"]')?.click();
+}
+window.addEventListener('panettone:modechange',syncUiMode);
+$('ui-mode-preference').addEventListener('change',event=>window.PanettoneUI?.setMode(event.currentTarget.value));
+
+window.addEventListener('panettone:themechange',()=>{
+  const page=document.querySelector('[data-page]:not([hidden])')?.dataset.page;
+  if(page==='home')drawChart(readingsCache);
+  else if(page==='camera')drawGrowthChart(growthHistoryCache);
+  else if(page==='fermenter'&&fermenterHistoryCache.readings.length)
+    drawFermenterChart(fermenterHistoryCache.readings,fermenterHistoryCache.actions,Number($('fermenter-form').elements.target_c.value));
+});
 
 const formatBytes=value=>{if(!Number.isFinite(value))return 'No disponible';const units=['B','KB','MB','GB','TB'];let amount=value,index=0;while(amount>=1024&&index<units.length-1){amount/=1024;index++;}return `${amount.toFixed(index?1:0)} ${units[index]}`;};
 async function refreshResources(){
@@ -242,6 +320,11 @@ document.querySelectorAll('[data-fermentation-tab]').forEach(button=>button.addE
 }));
 document.querySelector('#fermentation-sort')?.addEventListener('change',renderFermentations);
 
+function cssToken(name,fallback){
+  if(typeof getComputedStyle!=='function'||!document.documentElement)return fallback;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()||fallback;
+}
+
 function drawChart(rows) {
   const canvas=$('chart'),box=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
   if(!box.width||!box.height)return;
@@ -264,7 +347,7 @@ function drawChart(rows) {
   const [tMin,tMax]=bounds(temperatures,1,[0,1]),[hMin,hMax]=bounds(humidities,5,[0,1]);
   const first=Date.parse(all[0].captured_at),last=Date.parse(all.at(-1).captured_at);
   const plot=(value,min,max)=>max===min?.5:(value-min)/(max-min);
-  ctx.font='10px sans-serif';ctx.fillStyle='#596c62';ctx.strokeStyle='#e8ece9';ctx.lineWidth=1;
+  ctx.font='10px sans-serif';ctx.fillStyle=cssToken('--chart-label','#596c62');ctx.strokeStyle=cssToken('--chart-grid','#e8ece9');ctx.lineWidth=1;
   for(let i=0;i<4;i++){
     const y=p.t+(h-p.t-p.b)*i/3;
     ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();
@@ -282,10 +365,10 @@ function drawChart(rows) {
       if(!started){ctx.moveTo(x,y);started=true}else ctx.lineTo(x,y);previous=time;
     });ctx.stroke();
   };
-  if(ambientTemp.length)series(ambient,'temperature_c',tMin,tMax,'#3e9375');
-  if(doughTemp.length)series(dough,'temperature_c',tMin,tMax,'#557dce');
-  if(humidity.length)series(ambient,'humidity_rh',hMin,hMax,'#d9954c');
-  ctx.fillStyle='#74837e';const label=time=>new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(time));
+  if(ambientTemp.length)series(ambient,'temperature_c',tMin,tMax,cssToken('--chart-temperature','#3e9375'));
+  if(doughTemp.length)series(dough,'temperature_c',tMin,tMax,cssToken('--chart-dough','#557dce'));
+  if(humidity.length)series(ambient,'humidity_rh',hMin,hMax,cssToken('--chart-humidity','#d9954c'));
+  ctx.fillStyle=cssToken('--chart-label','#74837e');const label=time=>new Intl.DateTimeFormat('ca-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(time));
   ctx.fillText(label(first),p.l,h-4);ctx.fillText(label(last),Math.max(p.l,w-p.r-35),h-4);
 }
 
@@ -343,16 +426,16 @@ function drawGrowthChart(rows) {
   const low=Math.floor(Math.min(0,...valid.map(x=>x.growth_score))/25)*25,high=Math.max(100,Math.ceil(Math.max(...valid.map(x=>x.growth_score))/25)*25);
   const first=new Date(ref.captured_at).getTime(),last=new Date(end.captured_at).getTime(),span=Math.max(1,last-first);
   const xAt=at=>p.l+(w-p.l-p.r)*(new Date(at).getTime()-first)/span,yAt=value=>p.t+(h-p.t-p.b)*(1-(value-low)/(high-low));
-  ctx.font='11px sans-serif';ctx.fillStyle='#74877d';ctx.strokeStyle='#e0e9e3';ctx.lineWidth=1;
+  ctx.font='11px sans-serif';ctx.fillStyle=cssToken('--chart-label','#74877d');ctx.strokeStyle=cssToken('--chart-grid','#e0e9e3');ctx.lineWidth=1;
   for(let n=0;n<5;n++){const value=low+(high-low)*n/4,y=yAt(value);ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();ctx.fillText(`${value.toFixed(0)}%`,1,y+3);}
-  for(const threshold of [100,200])if(threshold<=high){ctx.setLineDash([4,4]);ctx.strokeStyle='#c39b5e';ctx.beginPath();ctx.moveTo(p.l,yAt(threshold));ctx.lineTo(w-p.r,yAt(threshold));ctx.stroke();ctx.setLineDash([]);}
-  ctx.strokeStyle='#3e9375';ctx.lineWidth=2;ctx.beginPath();let penDown=false;
+  for(const threshold of [100,200])if(threshold<=high){ctx.setLineDash([4,4]);ctx.strokeStyle=cssToken('--chart-milestone','#c39b5e');ctx.beginPath();ctx.moveTo(p.l,yAt(threshold));ctx.lineTo(w-p.r,yAt(threshold));ctx.stroke();ctx.setLineDash([]);}
+  ctx.strokeStyle=cssToken('--chart-growth','#3e9375');ctx.lineWidth=2;ctx.beginPath();let penDown=false;
   const times=series.map((r,i)=>i?new Date(r.captured_at)-new Date(series[i-1].captured_at):null).filter(t=>t>0).sort((a,b)=>a-b);
   const maxGap=times.length?Math.max(180000,times[Math.floor(times.length/2)]*2.5):Infinity;
   series.forEach((row,index)=>{if(!Number.isFinite(row.growth_score)){penDown=false;return;}if(index&&new Date(row.captured_at)-new Date(series[index-1].captured_at)>maxGap)penDown=false;const x=xAt(row.captured_at),y=yAt(row.growth_score);if(penDown)ctx.lineTo(x,y);else ctx.moveTo(x,y);penDown=true;});ctx.stroke();
-  ctx.fillStyle='#3e9375';for(const row of valid){ctx.beginPath();ctx.arc(xAt(row.captured_at),yAt(row.growth_score),2,0,Math.PI*2);ctx.fill();}
-  for(const mark of PanettoneCameraState.milestones(series,ref)){ctx.fillStyle='#b58138';ctx.beginPath();ctx.arc(xAt(mark.captured_at),yAt(mark.percent),4,0,Math.PI*2);ctx.fill();}
-  ctx.fillStyle='#74877d';ctx.fillText(fmtTime(ref.captured_at),p.l,h-5);ctx.fillText(fmtTime(end.captured_at),Math.max(p.l,w-p.r-95),h-5);
+  ctx.fillStyle=cssToken('--chart-growth','#3e9375');for(const row of valid){ctx.beginPath();ctx.arc(xAt(row.captured_at),yAt(row.growth_score),2,0,Math.PI*2);ctx.fill();}
+  for(const mark of PanettoneCameraState.milestones(series,ref)){ctx.fillStyle=cssToken('--chart-milestone','#b58138');ctx.beginPath();ctx.arc(xAt(mark.captured_at),yAt(mark.percent),4,0,Math.PI*2);ctx.fill();}
+  ctx.fillStyle=cssToken('--chart-label','#74877d');ctx.fillText(fmtTime(ref.captured_at),p.l,h-5);ctx.fillText(fmtTime(end.captured_at),Math.max(p.l,w-p.r-95),h-5);
 }
 function growthFor(photo){
   if(!photo||!growthCalibration||calibrationDirty||!displayCalibrationSignature||photo.analysisSignature!==displayCalibrationSignature)return null;
@@ -528,12 +611,50 @@ function renderCameraFreshness(photo,monitoring){
 }
 
 $('monitoring-button').addEventListener('click',async()=>{const button=$('monitoring-button');button.disabled=true;try{const result=await json('/api/monitoring',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:!button.classList.contains('stop')})});renderMonitoring(result);await refresh();}catch(error){window.alert(error.message);}finally{button.disabled=false;}});
+
+function openFermentationWizard(){
+  const form=$('simple-fermentation-form');form.reset();form.elements.camera_enabled.checked=true;$('other-kind-field').hidden=true;$('other-kind').required=false;$('other-kind').value='';
+  const target=parseFloat($('home-control-target').textContent);if(Number.isFinite(target)&&target>=15&&target<=30)form.elements.target_fermenter_temp_c.value=target;
+  form.querySelectorAll('[data-wizard-step]').forEach(step=>step.hidden=step.dataset.wizardStep!=='1');
+  $('wizard-step-label').textContent='PAS 1 DE 3';$('wizard-title').textContent='Què fermentarem?';$('wizard-feedback').textContent='';
+  $('fermentation-wizard').showModal();
+}
+function showWizardStep(number){
+  $('simple-fermentation-form').querySelectorAll('[data-wizard-step]').forEach(step=>step.hidden=step.dataset.wizardStep!==String(number));
+  $('wizard-step-label').textContent=`PAS ${number} DE 3`;
+  $('wizard-title').textContent=number===1?'Què fermentarem?':number===2?'Paràmetres bàsics':'Revisa abans de començar';
+  if(number===3){const form=$('simple-fermentation-form'),kind=form.elements.fermentation_kind.value,custom=$('other-kind').value.trim();$('wizard-summary-kind').textContent=kind==='other'?(custom||'Una altra fermentació'):prettyFermentationKind(kind);$('wizard-summary-target').textContent=form.elements.target_fermenter_temp_c.value?`${Number(form.elements.target_fermenter_temp_c.value).toLocaleString('ca-ES')} °C · només queda registrada`:'Sense objectiu de temperatura';$('wizard-summary-camera').textContent=form.elements.camera_enabled.checked?'Sí':'No';}
+}
+$('simple-start-button').addEventListener('click',openFermentationWizard);
+$('simple-new-button').addEventListener('click',()=>{justFinishedFermentation=null;renderSimpleDashboard();openFermentationWizard();});
+$('advanced-start-fermentation')?.addEventListener('click',openFermentationWizard);
+$('fermentation-kind').addEventListener('change',event=>{$('other-kind-field').hidden=event.currentTarget.value!=='other';$('other-kind').required=event.currentTarget.value==='other';});
+$('simple-fermentation-form').querySelectorAll('[data-wizard-next]').forEach(button=>button.addEventListener('click',()=>{const form=$('simple-fermentation-form'),step=Number(button.closest('[data-wizard-step]').dataset.wizardStep);if(step===1&&form.elements.fermentation_kind.value==='other'&&!$('other-kind').value.trim()){$('other-kind').focus();return;}showWizardStep(step+1);}));
+$('simple-fermentation-form').querySelectorAll('[data-wizard-back]').forEach(button=>button.addEventListener('click',()=>showWizardStep(Number(button.closest('[data-wizard-step]').dataset.wizardStep)-1)));
+$('fermentation-wizard').querySelectorAll('[data-wizard-close]').forEach(button=>button.addEventListener('click',()=>$('fermentation-wizard').close()));
+
+async function createFermentation(payload,feedback,form){
+  try{await json('/api/fermentations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});form?.reset();$('fermentation-wizard').close();justFinishedFermentation=null;await refresh();}
+  catch(error){feedback.textContent=`No s’ha pogut iniciar. ${error.message}`;}
+}
+$('simple-fermentation-form').addEventListener('submit',async event=>{
+  event.preventDefault();const form=event.currentTarget,payload=Object.fromEntries(new FormData(form));
+  const selected=payload.fermentation_kind,kind=selected==='other'?$('other-kind').value.trim():prettyFermentationKind(selected),note=payload.notes||'';
+  delete payload.fermentation_kind;delete payload.notes;
+  payload.notes=`Tipus de fermentació: ${kind}${note?`\n${note}`:''}`;payload.camera_enabled=form.elements.camera_enabled.checked;
+  $('wizard-feedback').textContent='Iniciant fermentació…';await createFermentation(payload,$('wizard-feedback'),form);
+});
+$('fermentation-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,payload=Object.fromEntries(new FormData(form));payload.camera_enabled=form.elements.camera_enabled.checked;await createFermentation(payload,$('session-status'),form);});
+$('simple-finish-button').addEventListener('click',async()=>{if(!activeFermentation||!window.confirm('Vols finalitzar aquesta fermentació?'))return;try{await json(`/api/fermentations/${activeFermentation.id}/end`,{method:'POST'});await refresh();}catch(error){window.alert(`No s’ha pogut finalitzar. ${error.message}`);}});
+$('end-fermentation').addEventListener('click',async()=>{if(!activeFermentation||!window.confirm('Finalitzar aquesta fermentació?'))return;try{await json(`/api/fermentations/${activeFermentation.id}/end`,{method:'POST'});await refresh();}catch(error){window.alert(error.message);}});
+$('simple-view-summary').addEventListener('click',()=>showPage('fermentations'));
+$('simple-note-button').addEventListener('click',()=>{$('simple-note-form').reset();$('simple-note-feedback').textContent='';$('simple-note-dialog').showModal();});
+$('simple-note-dialog').querySelectorAll('[data-note-close]').forEach(button=>button.addEventListener('click',()=>$('simple-note-dialog').close()));
+$('simple-note-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,feedback=$('simple-note-feedback');try{await json('/api/events',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event_type:'manual_note',details:form.elements.details.value.trim()})});$('simple-note-dialog').close();await refreshFermentation();}catch(error){feedback.textContent=`No s’ha pogut desar la nota. ${error.message}`;}});
 $('fermenter-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,feedback=$('fermenter-feedback'),payload=Object.fromEntries(new FormData(form));for(const input of form.querySelectorAll('input[type=checkbox]'))payload[input.name]=input.checked;payload.max_on_seconds=Number(payload.max_on_seconds)*60;try{feedback.textContent='Desant configuració…';await json('/api/fermenter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});feedback.textContent='Configuració desada.';await refreshFermenterOnly();}catch(error){feedback.textContent=`No s’ha pogut desar: ${error.message}`;}});
 document.querySelectorAll('.stepper [data-step]').forEach(button=>button.addEventListener('click',()=>{const input=button.parentElement.querySelector('input');input.value=(Number(input.value)+Number(button.dataset.step)).toFixed(1);input.dispatchEvent(new Event('change',{bubbles:true}));}));
 $('blanket-test-start').addEventListener('click',async()=>{const seconds=Number($('blanket-test-duration').value);if(!window.confirm(`Iniciar una prova física de ${seconds} segons? Confirma que ets al costat de la fermentadora i que les proteccions físiques s’han revisat.`))return;const button=$('blanket-test-start');button.disabled=true;$('blanket-test-status').textContent='Demanant prova temporitzada…';try{await json('/api/fermenter/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({duration_seconds:seconds})});await refreshFermenterOnly();}catch(error){$('blanket-test-status').textContent=error.message;}finally{button.disabled=false;}});
 $('blanket-test-stop').addEventListener('click',async()=>{if(!window.confirm('Demanar ara l’apagada de la manta?'))return;try{await json('/api/fermenter/test/stop',{method:'POST'});await refreshFermenterOnly();}catch(error){$('blanket-test-status').textContent=error.message;}});
-$('fermentation-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,feedback=$('session-status'),payload=Object.fromEntries(new FormData(form));payload.camera_enabled=form.elements.camera_enabled.checked;try{await json('/api/fermentations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});form.reset();await refresh();}catch(error){feedback.textContent=`No s’ha pogut iniciar: ${error.message}`;}});
-$('end-fermentation').addEventListener('click',async()=>{if(!activeFermentation||!window.confirm('Finalitzar aquesta fermentació?'))return;try{await json(`/api/fermentations/${activeFermentation.id}/end`,{method:'POST'});await refresh();}catch(error){window.alert(error.message);}});
 $('event-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,payload=Object.fromEntries(new FormData(form));try{await json('/api/events',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});form.reset();$('event-feedback').textContent='Anotació desada.';await refresh();}catch(error){$('event-feedback').textContent=`No s’ha pogut desar: ${error.message}`;}});
 
 let calibrationDrag=null;
@@ -598,6 +719,9 @@ function renderFermenter(data,historyData=null) {
   $('fermenter-schedule').textContent=schedule.next_change?`${schedule.label} · canvi ${fmtTime(schedule.next_change)}`:schedule.label;
   $('fermenter-alert').hidden=!(runtime.error||runtime.lockout_reason||(!fresh&&runtime.observed_at));
   $('fermenter-alert').textContent=runtime.lockout_reason?`ALARMA BLOQUEJADA: ${runtime.lockout_reason}. Calefacció desactivada.`:runtime.error?`Alarma de comunicació: ${runtime.error}. Calefacció desactivada.`:!fresh&&runtime.observed_at?'La lectura del DHT22 és massa antiga. Calefacció desactivada.':'';
+  const simpleAlert=$('simple-safety-alert');simpleAlert.hidden=$('fermenter-alert').hidden;
+  simpleAlert.textContent=runtime.lockout_reason?'Alerta de seguretat: la calefacció s’ha aturat. Demana ajuda abans de continuar.':runtime.error?'No hi ha comunicació amb el control de temperatura. La calefacció està aturada.':!fresh&&runtime.observed_at?'No arriba una lectura recent de temperatura. La calefacció està aturada.':'';
+  $('page-home').querySelector('.simple-home').classList.toggle('has-safety-alert',!simpleAlert.hidden);
   $('ack-fermenter-alarm').hidden=!runtime.lockout_reason;
   const values={mode:config.mode,target_c:config.target_c,hysteresis_c:config.hysteresis_c,
     min_switch_seconds:config.min_switch_seconds,max_on_seconds:Math.round(config.max_on_seconds/60),
@@ -619,19 +743,19 @@ function drawFermenterChart(readings,actions,target) {
   const rows=readings.filter(x=>Number.isFinite(x.temperature_c));$('fermenter-chart-empty').style.display=rows.length?'none':'grid';if(!rows.length)return;
   const temps=rows.map(x=>x.temperature_c),lo=Math.floor(Math.min(...temps,target)-1),hi=Math.ceil(Math.max(...temps,target)+1),range=Math.max(1,hi-lo);
   const xAt=i=>p.l+(w-p.l-p.r)*i/Math.max(1,rows.length-1),yAt=v=>p.t+(h-p.t-p.b)*(1-(v-lo)/range);
-  ctx.font='10px sans-serif';ctx.fillStyle='#9aa69f';ctx.strokeStyle='#edf0ed';ctx.lineWidth=1;
+  ctx.font='10px sans-serif';ctx.fillStyle=cssToken('--chart-label','#9aa69f');ctx.strokeStyle=cssToken('--chart-grid','#edf0ed');ctx.lineWidth=1;
   for(let i=0;i<4;i++){const value=hi-range*i/3,y=yAt(value);ctx.beginPath();ctx.moveTo(p.l,y);ctx.lineTo(w-p.r,y);ctx.stroke();ctx.fillText(value.toFixed(0),2,y+3);}
   const targetChanges=actions.filter(a=>a.event_type==='configuration'&&Number.isFinite(a.target_c))
     .map(a=>({at:new Date(a.occurred_at).getTime(),value:Number(a.target_c)})).sort((a,b)=>a.at-b.at);
   let targetIndex=-1;
   const targetAt=timestamp=>{while(targetIndex+1<targetChanges.length&&targetChanges[targetIndex+1].at<=timestamp)targetIndex++;return targetIndex<0?target:targetChanges[targetIndex].value;};
-  ctx.strokeStyle='#d9954c';ctx.setLineDash([5,4]);ctx.beginPath();
+  ctx.strokeStyle=cssToken('--chart-target','#d9954c');ctx.setLineDash([5,4]);ctx.beginPath();
   rows.forEach((row,i)=>{const x=xAt(i),y=yAt(targetAt(new Date(row.captured_at).getTime()));if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
   ctx.stroke();ctx.setLineDash([]);
-  ctx.strokeStyle='#3e9375';ctx.lineWidth=2;ctx.beginPath();rows.forEach((row,i)=>{const x=xAt(i),y=yAt(row.temperature_c);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});ctx.stroke();
+  ctx.strokeStyle=cssToken('--chart-temperature','#3e9375');ctx.lineWidth=2;ctx.beginPath();rows.forEach((row,i)=>{const x=xAt(i),y=yAt(row.temperature_c);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});ctx.stroke();
   const start=new Date(rows[0].captured_at).getTime(),end=new Date(rows.at(-1).captured_at).getTime(),span=Math.max(1,end-start);
-  ctx.strokeStyle='#7859a6';ctx.lineWidth=2;actions.filter(a=>a.event_type==='simulated_output_on'||a.event_type==='simulated_output_off').forEach(a=>{const x=p.l+(w-p.l-p.r)*(new Date(a.occurred_at).getTime()-start)/span;ctx.beginPath();ctx.moveTo(x,h-p.b-8);ctx.lineTo(x,h-p.b);ctx.stroke();});
-  ctx.fillStyle='#9aa69f';ctx.fillText(fmtTime(rows[0].captured_at),p.l,h-3);ctx.fillText(fmtTime(rows.at(-1).captured_at),Math.max(p.l,w-p.r-42),h-3);
+  ctx.strokeStyle=cssToken('--chart-output','#7859a6');ctx.lineWidth=2;actions.filter(a=>a.event_type==='simulated_output_on'||a.event_type==='simulated_output_off').forEach(a=>{const x=p.l+(w-p.l-p.r)*(new Date(a.occurred_at).getTime()-start)/span;ctx.beginPath();ctx.moveTo(x,h-p.b-8);ctx.lineTo(x,h-p.b);ctx.stroke();});
+  ctx.fillStyle=cssToken('--chart-label','#9aa69f');ctx.fillText(fmtTime(rows[0].captured_at),p.l,h-3);ctx.fillText(fmtTime(rows.at(-1).captured_at),Math.max(p.l,w-p.r-42),h-3);
 }
 
 async function refreshFermenterOnly(){try{renderFermenter(await json('/api/fermenter'));}catch(error){if(error.message!=='Sessió caducada')console.warn('Estat de la fermentadora no disponible',error);}}
@@ -880,4 +1004,4 @@ $('probe-form').addEventListener('submit',async event=>{
 });
 showPage(location.hash.slice(1),false);refresh();setInterval(refresh,30000);
 setInterval(refreshFermenterOnly,5000);
-if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.12.2',{updateViaCache:'none'}).catch(()=>{});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js?v=0.15.0',{updateViaCache:'none'}).catch(()=>{});

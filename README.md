@@ -1,4 +1,8 @@
-# Panettone Lab v0.13.0
+# Panettone Lab v0.15.0
+
+v0.15.0 introdueix el mode simple amb inici guiat en tres passos, seguiment essencial, finalització clara i navegació «Inici / Històric / Ajustos». El mode avançat conserva les pantalles i eines existents. No modifica API, esquema SQLite, dades ni control tèrmic. [Notes v0.15.0](docs/v0.15.0.md).
+
+v0.14.0 afegeix una base de temes clar/fosc/automàtic, amb preferència local persistent i coherència de colors a l’accés i al dashboard. No canvia el flux de fermentació, el registre, les API, SQLite ni el control tèrmic. [Notes v0.14.0](docs/v0.14.0.md).
 
 v0.13.0 replanteja la navegació per a nous usuaris: quatre seccions principals, «Eines» agrupa fotografies i ajustos, i el resum separa explícitament el registre automàtic de les sessions de fermentació. Si no hi ha cap fermentació activa, ofereix començar-ne una directament des del resum. No modifica la recollida de dades, l’autenticació, SQLite ni el control tèrmic. [Notes v0.13.0](docs/v0.13.0.md).
 

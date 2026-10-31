@@ -1,0 +1,195 @@
+:root {
+  color-scheme: light;
+  --ink: #173630;
+  --muted: #74837e;
+  --green: #174c42;
+  --mint: #e7f1eb;
+  --line: #e8ece9;
+  --paper: #f6f8f5;
+  --white: #fff;
+  --surface-raised: #fbfcfa;
+  --surface-control: #fff;
+  --surface-tint: #eaf3ed;
+  --text-secondary: #596c62;
+  --text-tertiary: #829189;
+  --input-border: #dfe6e1;
+  --shadow-color: #17363012;
+  --chart-grid: #e8ece9;
+  --chart-label: #596c62;
+  --chart-temperature: #3e9375;
+  --chart-dough: #557dce;
+  --chart-humidity: #d9954c;
+  --chart-growth: #3e9375;
+  --chart-target: #d9954c;
+  --chart-output: #7859a6;
+  --chart-milestone: #b58138;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e7f0eb;
+  --muted: #a9b9b1;
+  --green: #8fd0b0;
+  --mint: #243b31;
+  --line: #34483e;
+  --paper: #111a16;
+  --white: #1b2822;
+  --surface-raised: #202e27;
+  --surface-control: #17231d;
+  --surface-tint: #263d32;
+  --text-secondary: #bdccc4;
+  --text-tertiary: #a5b6ad;
+  --input-border: #465b50;
+  --shadow-color: #0008;
+  --amber: #f2c16d;
+  --red: #ff978a;
+  --chart-grid: #34483e;
+  --chart-label: #bdccc4;
+  --chart-temperature: #72c99e;
+  --chart-dough: #90b9ff;
+  --chart-humidity: #f2bd67;
+  --chart-growth: #72c99e;
+  --chart-target: #f2bd67;
+  --chart-output: #bd9be8;
+  --chart-milestone: #f2bd67;
+}
+
+body,
+.topbar,
+.metric-card,
+.panel,
+.app-nav,
+.login-card,
+.home-history,
+.tool-link,
+.dashboard-status {
+  color: var(--ink);
+  background-color: var(--white);
+  border-color: var(--line);
+}
+
+body { background-color: var(--paper); }
+.topbar { box-shadow: 0 2px 12px var(--shadow-color); }
+.metric-card, .panel, .app-nav, .login-card, .history-item { box-shadow: 0 3px 14px var(--shadow-color); }
+
+.home-fermentation-grid article,
+.fermentation-detail-grid article,
+.settings-grid article,
+.home-device-grid article,
+.fermenter-readouts article,
+.history-item,
+.event-timeline li,
+.archive-photo,
+.timed-test,
+.manual-editor,
+.timeline-marker,
+.growth-result {
+  color: var(--ink);
+  background-color: var(--surface-raised);
+  border-color: var(--line);
+}
+
+.secondary-button,
+.range-select select,
+.camera-tools select,
+.camera-compare select,
+.photo-sampling-control select,
+.calibration-adjust select,
+.archive-sort select,
+.archive-controls select,
+.timed-test select,
+.period-form input,
+.data-form input,
+.data-form select,
+.fermenter-form input:not([type="checkbox"]),
+.fermenter-form select,
+.login-card input {
+  color: var(--ink);
+  background-color: var(--surface-control);
+  border-color: var(--input-border);
+}
+
+.secondary-button:hover,
+.nav-item:hover,
+.nav-item.is-active { background-color: var(--surface-tint); }
+.nav-item, .nav-item > span:first-child, .metric-label,
+.data-form label, .fermenter-form label, .login-card label,
+.chart-description, .chart-data-table th, .chart-data-table td,
+.chart-data-table caption, .history-item p, .settings-grid p {
+  color: var(--text-secondary);
+}
+
+.brand, .brand em, .brand-copy em, .metric-value, .growth-level,
+.panel-heading h2, h1, h2, h3, .home-fermentation-grid article > strong,
+.fermentation-detail-grid article > strong {
+  color: var(--ink);
+}
+.brand small, .brand small.version, .eyebrow, .metric-foot,
+.metric-label span, .metric-value small, .photo-count, footer,
+.chart-legend, .empty-state, .growth-note, .physical-output,
+.fermenter-readouts article > span, .fermenter-readouts article > small {
+  color: var(--text-tertiary);
+}
+
+.live { background-color: #dcefe3; color: #285f41; }
+.live.paused { background-color: #e8ece9; color: #5f6d66; }
+.camera-status, .data-freshness, .dashboard-refresh { color: var(--text-secondary); }
+.camera-status.ok, .data-freshness.fresh { color: #287b4d; }
+.camera-status.stale, .data-freshness.stale { color: #835515; }
+.camera-status.bad, .dashboard-feedback { color: #943f35; }
+.camera-status.unknown, .data-freshness.unknown { color: var(--text-secondary); }
+
+.simulation-badge { background-color: #fff3df; color: #96651f; }
+.safety-banner { background-color: #fffaf0; color: #775d2e; }
+.fermenter-alert, .dashboard-feedback, .timeline-marker.drop,
+.timeline-marker.gap { background-color: #fff0ed; color: #9a4337; }
+.error { background-color: #fff0ed; color: #9a4337; }
+.stop-session, .secondary-button.stop, #ack-fermenter-alarm,
+.fermenter-actions li.alarm { color: var(--red); }
+.active-fermentation-detail { border-color: #426b54; }
+.event-timeline li { border-left-color: #426b54; }
+.growth-milestones p { background-color: var(--surface-raised); color: var(--text-secondary); }
+
+.metric-value small { opacity: .9; }
+.photo-item { background-color: var(--surface-raised); }
+.home-photo-preview > img, .camera-viewer > img,
+.comparison-images img, .archive-photo img,
+.camera-frame, .roi-frame { background-color: #101614; }
+.growth-overlay { background-color: var(--surface-raised); color: var(--ink); }
+.timeline-marker.doubled, .timeline-marker.tripled { background-color: #3b3324; color: #f3d79e; }
+.guide:before { box-shadow: 0 0 2px #0008; }
+
+.theme-preference-card label {
+  display: block;
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+.theme-preference-card select {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 6px;
+  padding: 9px 12px;
+  border: 1px solid var(--input-border);
+  border-radius: 9px;
+  color: var(--ink);
+  background: var(--surface-control);
+  font: inherit;
+}
+
+:root[data-theme="dark"] .simulation-badge { background-color: #3d321d; color: #f4d38e; }
+:root[data-theme="dark"] .safety-banner { background-color: #342c1c; color: #f0d7a0; border-color: #8b7040; }
+:root[data-theme="dark"] .fermenter-alert,
+:root[data-theme="dark"] .dashboard-feedback,
+:root[data-theme="dark"] .timeline-marker.drop,
+:root[data-theme="dark"] .timeline-marker.gap,
+:root[data-theme="dark"] .error { background-color: #3b2422; color: #ffb1a7; }
+:root[data-theme="dark"] .chart-milestone { color: var(--chart-milestone); }
+
+:focus-visible { outline-color: #58a8ef; }
+@media (prefers-reduced-motion: no-preference) {
+  body, .topbar, .panel, .metric-card, .app-nav, .secondary-button {
+    transition: background-color .18s ease, color .18s ease, border-color .18s ease;
+  }
+}
