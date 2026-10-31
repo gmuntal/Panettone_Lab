@@ -1,4 +1,8 @@
-# Panettone Lab v0.17.2
+# Panettone Lab v0.17.3
+
+v0.17.3 compacta les dades principals de la vista simple, agrupa temperatura i humitat, simplifica el selector i la llegenda de l’evolució, deixa els valors seleccionats visibles sota el gràfic i redueix el menú mòbil a icones coherents. No modifica API, SQLite, dades ni control tèrmic. [Notes v0.17.3](docs/v0.17.3.md).
+
+v0.17.2 corregeix el límit temporal de les gràfiques de fermentacions actives: les lectures vàlides ja no es descarten per un valor final de sessió absent. No modifica API, SQLite, dades, captura ni control tèrmic. [Notes v0.17.2](docs/v0.17.2.md).
 
 v0.17.2 corregeix el límit temporal de les gràfiques de fermentacions actives: les lectures vàlides ja no es descarten per un valor final de sessió absent. No modifica API, SQLite, dades, captura ni control tèrmic. [Notes v0.17.2](docs/v0.17.2.md).
 

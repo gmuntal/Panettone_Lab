@@ -73,7 +73,6 @@ function renderSimpleDashboard(){
   const sensorFresh=$('sensor-freshness').classList.contains('fresh');
   const tempText=$('temperature').textContent.replace('°C','').trim();
   $('simple-ambient-temperature').textContent=sensorFresh&&tempText!=='—'?`${tempText} °C`:'— °C';
-  $('simple-ambient-help').textContent=sensorFresh?'Darrera lectura recent':$('sensor-freshness').classList.contains('stale')?'La darrera lectura és antiga':'Sensor sense lectura disponible';
   const probeValue=$('dough-temperature').textContent.replace('°C','').trim();
   const probeFresh=lastKnownProbeReading&&Date.now()-new Date(lastKnownProbeReading.captured_at).getTime()<=120000;
   $('simple-dough-fact').hidden=!(probeFresh&&probeValue!=='—');
@@ -83,7 +82,7 @@ function renderSimpleDashboard(){
   $('simple-humidity').textContent=sensorFresh&&humidityText!=='—'?`${humidityText} %`:'— %';
   const growth=simpleGrowthState?.fermentationId===current?.id?simpleGrowthState:null;
   $('simple-growth-fact').hidden=!(current&&growth?.factor!==null&&Number.isFinite(growth?.factor));
-  if(growth?.factor!==null&&Number.isFinite(growth?.factor)){$('simple-growth').textContent=`×${growth.factor.toLocaleString('ca-ES',{minimumFractionDigits:1,maximumFractionDigits:2})}`;$('simple-growth-help').textContent='Alçada estimada per la càmera; no és una mesura exacta.';}
+  if(growth?.factor!==null&&Number.isFinite(growth?.factor))$('simple-growth').textContent=`×${growth.factor.toLocaleString('ca-ES',{minimumFractionDigits:1,maximumFractionDigits:2})}`;
   const photo=visiblePhotoRows[simplePhotoIndex]||(!photoSession||String(lastKnownPhoto?.fermentation_id)===String(photoSession.id)?lastKnownPhoto:null),photoAge=photo?Date.now()-new Date(photo.captured_at).getTime():Infinity,photoFresh=photoAge<=Math.max(240000,Number($('camera-status').dataset.intervalSeconds||120)*2*1000);
   const image=$('simple-camera-image'),placeholder=$('simple-camera-placeholder'),stamp=$('simple-photo-time');
   if(photo?.camera_ok&&photo.filename){const imageUrl=`/photos/${encodeURIComponent(photo.filename)}?revision=${encodeURIComponent(photo.image_revision||photo.id)}`;if(image.dataset.photoUrl!==imageUrl){image.src=imageUrl;image.dataset.photoUrl=imageUrl;}image.hidden=false;placeholder.hidden=true;stamp.hidden=false;stamp.textContent=`${photoFresh?'Darrera fotografia':'Fotografia antiga'} · ${fmtTime(photo.captured_at)}${photoFresh?'':` · ${ageText(photo.captured_at)}`}`;}
@@ -151,7 +150,8 @@ function updateChartSessionOptions(){
   if(select.dataset.signature===signature)return;
   select.replaceChildren();
   const activeOption=document.createElement('option');activeOption.value='active';activeOption.textContent=activeFermentation?'Fermentació activa':'Fermentació més recent';select.append(activeOption);
-  for(const item of fermentationsCache){const option=document.createElement('option');option.value=String(item.id);option.textContent=`${recordedFermentationKind(item)||'Fermentació'} · ${new Date(item.started_at).toLocaleDateString('ca-ES')}${item.ended_at?'':' · en curs'}`;select.append(option);}
+  const defaultSessionId=activeFermentation?.id??fermentationsCache[0]?.id;
+  for(const item of fermentationsCache){if(String(item.id)===String(defaultSessionId))continue;const option=document.createElement('option');option.value=String(item.id);option.textContent=`${recordedFermentationKind(item)||'Fermentació'} · ${new Date(item.started_at).toLocaleDateString('ca-ES')}${item.ended_at?'':' · en curs'}`;select.append(option);}
   select.dataset.signature=signature;
   if(chartSessionId!=='active'&&!fermentationsCache.some(item=>String(item.id)===String(chartSessionId)))chartSessionId='active';
   select.value=chartSessionId;
@@ -159,8 +159,8 @@ function updateChartSessionOptions(){
 async function refreshUnifiedChart(){
   const request=++chartRefreshSequence,session=chartSession(),range=$('range').value;
   chartGrowthRows=[];chartAmbientRows=[];chartProbeRows=[];chartSessionDomain=null;chartCursorTime=null;
-  chartTooltipPinned=false;$('chart-tooltip').hidden=true;
-  if(!session){drawChart([]);$('chart-empty').textContent='Selecciona una fermentació per veure’n l’evolució.';return;}
+  chartTooltipPinned=false;$('chart-tooltip-content').textContent='Carregant dades…';
+  if(!session){drawChart([]);$('chart-empty').textContent='Selecciona una fermentació per veure’n l’evolució.';$('chart-tooltip-content').textContent='Encara no hi ha cap fermentació per consultar.';return;}
   const start=session.started_at,end=session.ended_at||new Date().toISOString();
   const sessionStart=Date.parse(start),sessionEnd=Date.parse(end);
   const visibleStart=range==='fermentation'?start:new Date(Math.max(sessionStart,Date.now()-Number(range)*3600000)).toISOString();
@@ -186,8 +186,10 @@ async function refreshUnifiedChart(){
     chartGrowthRows=chartGrowthRows.filter(point=>Date.parse(point.captured_at)>=low&&Date.parse(point.captured_at)<=high);
   }
   drawChart(chartAmbientRows);
+  if(lastChartPoints.length)showChartTooltipTime(Math.max(...lastChartPoints.map(point=>Date.parse(point.row.captured_at))));
+  else $('chart-tooltip-content').textContent='Encara no hi ha dades per a aquesta fermentació.';
   if(currentUiMode()==='simple'&&activeFermentation&&String(chartSession()?.id)===String(activeFermentation.id)&&autoOpenedChartSessionId!==String(activeFermentation.id)){
-    const history=$('home-history-details');if(history){history.open=true;autoOpenedChartSessionId=String(activeFermentation.id);requestAnimationFrame(()=>drawChart(chartAmbientRows));}
+    const history=$('home-history-details');if(history){history.open=true;autoOpenedChartSessionId=String(activeFermentation.id);requestAnimationFrame(()=>{drawChart(chartAmbientRows);if(lastChartPoints.length)showChartTooltipTime(Math.max(...lastChartPoints.map(point=>Date.parse(point.row.captured_at))));});}
   }
 }
 
@@ -382,7 +384,7 @@ if(document.addEventListener)document.addEventListener('click',async event=>{
 });
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>showPage(button.dataset.view)));
 document.getElementById('home-history-details')?.addEventListener('toggle',event=>{
-  if(event.currentTarget.open) requestAnimationFrame(()=>drawChart(chartAmbientRows));
+  if(event.currentTarget.open) requestAnimationFrame(()=>{drawChart(chartAmbientRows);if(lastChartPoints.length&&chartCursorTime===null)showChartTooltipTime(Math.max(...lastChartPoints.map(point=>Date.parse(point.row.captured_at))));});
 });
 document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>{
   showPage(button.dataset.go);
@@ -472,13 +474,12 @@ function drawChart(rows) {
 document.querySelectorAll('[data-chart-series]').forEach(button=>button.addEventListener('click',()=>{
   const key=button.dataset.chartSeries;chartSeriesVisible[key]=!chartSeriesVisible[key];
   button.setAttribute('aria-pressed',String(chartSeriesVisible[key]));button.classList.toggle('is-muted',!chartSeriesVisible[key]);drawChart(chartAmbientRows);
+  if(lastChartPoints.length)showChartTooltipTime(chartCursorTime??Math.max(...lastChartPoints.map(point=>Date.parse(point.row.captured_at))));
+  else $('chart-tooltip-content').textContent='Activa una sèrie per consultar-ne els valors.';
 }));
 $('chart').addEventListener('pointermove',event=>{if(event.pointerType==='touch'){chartTooltipPinned=true;showChartTooltipAt(event,true);}else showChartTooltipAt(event,false);});
 $('chart').addEventListener('pointerdown',event=>{chartTooltipPinned=event.pointerType==='touch';showChartTooltipAt(event,true);});
-$('chart').addEventListener('pointerleave',()=>{if(!chartTooltipPinned){$('chart-tooltip').hidden=true;chartCursorTime=null;drawChart(chartAmbientRows);}});
-$('chart').addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Escape'].includes(event.key))return;event.preventDefault();if(event.key==='Escape'){$('chart-tooltip').hidden=true;chartTooltipPinned=false;chartCursorTime=null;drawChart(chartAmbientRows);return;}if(!lastChartPoints.length)return;chartKeyboardTime=chartKeyboardTime??lastChartDomain[0];chartKeyboardTime=Math.max(lastChartDomain[0],Math.min(lastChartDomain[1],chartKeyboardTime+(event.key==='ArrowRight'?60000:-60000)));chartTooltipPinned=true;showChartTooltipTime(chartKeyboardTime,true);});
-$('chart-tooltip-close').addEventListener('click',()=>{$('chart-tooltip').hidden=true;chartTooltipPinned=false;chartCursorTime=null;drawChart(chartAmbientRows);});
-document.addEventListener('pointerdown',event=>{if(!event.target.closest('.chart-wrap')){chartTooltipPinned=false;$('chart-tooltip').hidden=true;chartCursorTime=null;drawChart(chartAmbientRows);}});
+$('chart').addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Escape'].includes(event.key))return;event.preventDefault();if(event.key==='Escape'){chartTooltipPinned=false;const latest=lastChartPoints.length?Math.max(...lastChartPoints.map(point=>Date.parse(point.row.captured_at))):null;if(latest!==null)showChartTooltipTime(latest);return;}if(!lastChartPoints.length)return;chartKeyboardTime=chartKeyboardTime??lastChartDomain[0];chartKeyboardTime=Math.max(lastChartDomain[0],Math.min(lastChartDomain[1],chartKeyboardTime+(event.key==='ArrowRight'?60000:-60000)));chartTooltipPinned=true;showChartTooltipTime(chartKeyboardTime,true);});
 function showChartTooltipAt(event,syncPhoto){const rect=$('chart').getBoundingClientRect(),ratio=Math.max(0,Math.min(1,(event.clientX-rect.left-48)/(rect.width-48-58)));showChartTooltipTime(lastChartDomain[0]+(lastChartDomain[1]-lastChartDomain[0])*ratio,syncPhoto);}
 function showChartTooltipTime(target,syncPhoto=false){
   if(!lastChartPoints.length)return;
@@ -1100,9 +1101,6 @@ async function refresh() {
     lastPhotoAttempt=photo||lastPhotoAttempt;
     if(photo?.camera_ok&&photo.filename)lastKnownPhoto=photo;
     renderCameraFreshness(lastKnownPhoto,monitoring);
-    const latestImage=$('home-camera-image');
-    if(lastKnownPhoto?.camera_ok&&lastKnownPhoto.filename){latestImage.src=`/photos/${encodeURIComponent(lastKnownPhoto.filename)}`;latestImage.hidden=false;$('home-camera-time').textContent=`Captura ${new Date(lastKnownPhoto.captured_at).toLocaleString('ca-ES')} · ${ageText(lastKnownPhoto.captured_at)}${lastPhotoAttempt&&!lastPhotoAttempt.camera_ok?` · l’últim intent ha fallat (${fmtTime(lastPhotoAttempt.captured_at)})`:''}`;}
-    else{latestImage.removeAttribute('src');latestImage.hidden=true;$('home-camera-time').textContent=lastPhotoAttempt?`L’últim intent de captura no ha produït una imatge vàlida · ${fmtTime(lastPhotoAttempt.captured_at)}`:'Encara no hi ha cap fotografia disponible.';}
     await refreshUnifiedChart();
     if((currentUiMode()==='simple'&&location.hash!=='#fermentations'&&location.hash!=='#settings')||$('range').value==='fermentation')void refreshSimplePhotos();
     lastDashboardRefreshAt=new Date();$('dashboard-refresh').textContent=`Consulta completada · ${lastDashboardRefreshAt.toLocaleTimeString('ca-ES',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`;$('dashboard-feedback').hidden=true;
