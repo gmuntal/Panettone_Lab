@@ -408,7 +408,7 @@ function drawChart(rows) {
   canvas.width=box.width*dpr;canvas.height=box.height*dpr;
   const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);lastChartPoints=[];
   const w=box.width,h=box.height,p={l:48,r:58,t:16,b:28};
-  const sessionStart=chartSessionDomain?Date.parse(chartSessionDomain.started_at):null,sessionEnd=chartSessionDomain?Date.parse(chartSessionDomain.ended_at||Date.now()):null;
+  const sessionStart=chartSessionDomain?Date.parse(chartSessionDomain.started_at):null,sessionEnd=chartSessionDomain?(chartSessionDomain.ended_at?Date.parse(chartSessionDomain.ended_at):Date.now()):null;
   const inSession=row=>!chartSessionDomain||(Date.parse(row.captured_at)>=sessionStart&&Date.parse(row.captured_at)<=sessionEnd);
   const ambient=rows.filter(row=>Number.isFinite(Date.parse(row.captured_at))&&inSession(row));
   const dough=chartProbeRows.filter(row=>Number.isFinite(Date.parse(row.captured_at))&&inSession(row));

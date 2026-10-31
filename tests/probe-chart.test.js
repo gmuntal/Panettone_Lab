@@ -10,7 +10,7 @@ const tableStart = source.indexOf('function renderChartTable(', eventStart);
 const probeStart = source.indexOf('\nconst probeLabels=', tableStart);
 const chart = source.slice(drawStart,eventStart)+source.slice(tableStart,probeStart);
 
-function render(ambient, dough, visible={ambient:true,dough:true,humidity:true,growth:true},growth=[]) {
+function render(ambient, dough, visible={ambient:true,dough:true,humidity:true,growth:true},growth=[],session=null) {
   const strokes = [], labels = [], empty = {style: {}}, tableBody = {children:[],replaceChildren(...nodes){this.children=nodes;},append(node){this.children.push(node);}};
   let path = [];
   const ctx = {
@@ -24,7 +24,7 @@ function render(ambient, dough, visible={ambient:true,dough:true,humidity:true,g
   const canvas = {getBoundingClientRect:()=>({width:350,height:210}),getContext:()=>ctx};
   const element = tag => ({tag,children:[],append(...nodes){this.children.push(...nodes);},set textContent(value){this.text=String(value);},get textContent(){return this.text;}});
   const window={devicePixelRatio:1};vm.runInNewContext(chartStateSource,{window,Date,Number,Math});
-  const context = vm.createContext({window,probeReadingsCache:dough,chartProbeRows:dough,chartGrowthRows:growth,chartSessionDomain:null,chartSeriesVisible:visible,chartCursorTime:null,lastChartPoints:[],cssToken:(_name,fallback)=>fallback,
+  const context = vm.createContext({window,probeReadingsCache:dough,chartProbeRows:dough,chartGrowthRows:growth,chartSessionDomain:session,chartSeriesVisible:visible,chartCursorTime:null,lastChartPoints:[],cssToken:(_name,fallback)=>fallback,
     $: id=>id==='chart'?canvas:id==='chart-data-body'?tableBody:empty,
     document:{createElement:element}, Intl, Date, Number, Math});
   vm.runInContext(chart, context);
@@ -38,6 +38,13 @@ test('mass-only and humidity-only histories produce finite canvas coordinates',(
   assert.equal(render([],[row(0,21),row(30,22)]).empty.style.display,'none');
   assert.equal(render([row(0,null,{humidity_rh:60})],[]).empty.style.display,'none');
   assert.equal(render([],[]).empty.style.display,'grid');
+});
+test('active fermentation session keeps valid sensor readings inside the chart domain',()=>{
+  const session={started_at:'2026-10-30T12:00:00.000Z',ended_at:null};
+  const result=render([row(0,26,{humidity_rh:55}),row(30,27,{humidity_rh:56})],[],undefined,[],session);
+  assert.equal(result.empty.style.display,'none');
+  assert.ok(result.strokes.some(stroke=>stroke.color==='#d77d2b'&&stroke.path.length===2));
+  assert.ok(result.strokes.some(stroke=>stroke.color==='#32906b'&&stroke.path.length===2));
 });
 test('ambient and mass temperatures share the Celsius axis; humidity has a labelled percent axis',()=>{
   const result=render([row(0,25),row(60,25)],[row(30,25),row(60,25)]);

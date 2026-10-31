@@ -1,4 +1,6 @@
-# Panettone Lab v0.17.1
+# Panettone Lab v0.17.2
+
+v0.17.2 corregeix el límit temporal de les gràfiques de fermentacions actives: les lectures vàlides ja no es descarten per un valor final de sessió absent. No modifica API, SQLite, dades, captura ni control tèrmic. [Notes v0.17.2](docs/v0.17.2.md).
 
 v0.17.1 corregeix la càrrega de dades en canviar la fermentació seleccionada, elimina textos i accions redundants de la cronologia de fotos, afegeix una línia de cursor al gràfic i alinea la correcció manual de superfície amb la posició desada. No modifica APIs, SQLite, dades, càlibratge emmagatzemat ni control tèrmic. [Notes v0.17.1](docs/v0.17.1.md).
 
