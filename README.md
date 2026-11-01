@@ -1,4 +1,6 @@
-# Panettone Lab v0.17.3
+# Panettone Lab v0.17.4
+
+v0.17.4 compacta la graella principal en quatre quadres, mostra la data i antiguitat de la foto sobre la imatge, i redueix l’espai de la secció «Evolució» i dels controls d’acció. No modifica API, SQLite, dades ni control tèrmic. [Notes v0.17.4](docs/v0.17.4.md).
 
 v0.17.3 compacta les dades principals de la vista simple, agrupa temperatura i humitat, simplifica el selector i la llegenda de l’evolució, deixa els valors seleccionats visibles sota el gràfic i redueix el menú mòbil a icones coherents. No modifica API, SQLite, dades ni control tèrmic. [Notes v0.17.3](docs/v0.17.3.md).
 

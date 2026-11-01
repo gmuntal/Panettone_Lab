@@ -59,6 +59,7 @@ function renderSimpleDashboard(){
   $('simple-start-button').hidden=Boolean(current||finished);
   $('simple-finish-button').hidden=!current;
   $('simple-note-button').hidden=!current;
+  $('simple-detection-link').hidden=!current;
   $('simple-new-button').hidden=!finished;
   $('simple-session-state').textContent=current?'En curs':finished?'Finalitzada':'Preparat';
   $('header-fermentation-status').textContent=current?'Fermentació en curs':finished?'Fermentació finalitzada':'Preparat';
@@ -68,24 +69,24 @@ function renderSimpleDashboard(){
   const visiblePhotoRows=photoRowsMatchSession?simplePhotoRows:[];
   title.textContent=current?(kind||'Fermentació en curs'):finished?'Ja està!':'Preparat per començar';
   message.textContent=current?'':finished?'La fermentació ha acabat. Pots consultar-ne el resum.':'Quan vulguis, inicia una fermentació.';
-  $('simple-elapsed-fact').hidden=!current;
-  if(current){$('simple-elapsed').textContent=elapsedSince(current.started_at);}
+  $('simple-elapsed-fact').hidden=false;
+  $('simple-elapsed').textContent=current?elapsedSince(current.started_at):'—';
   const sensorFresh=$('sensor-freshness').classList.contains('fresh');
   const tempText=$('temperature').textContent.replace('°C','').trim();
   $('simple-ambient-temperature').textContent=sensorFresh&&tempText!=='—'?`${tempText} °C`:'— °C';
   const probeValue=$('dough-temperature').textContent.replace('°C','').trim();
   const probeFresh=lastKnownProbeReading&&Date.now()-new Date(lastKnownProbeReading.captured_at).getTime()<=120000;
-  $('simple-dough-fact').hidden=!(probeFresh&&probeValue!=='—');
-  $('simple-dough-temperature').textContent=probeFresh?`${probeValue} °C`:'— °C';
+  $('simple-dough-fact').hidden=false;
+  $('simple-dough-temperature').textContent=probeFresh&&probeValue!=='—'?`${probeValue} °C`:'—';
   const humidityText=$('humidity').textContent.replace('%','').trim();
-  $('simple-humidity-fact').hidden=!(sensorFresh&&humidityText!=='—');
+  $('simple-humidity-fact').hidden=false;
   $('simple-humidity').textContent=sensorFresh&&humidityText!=='—'?`${humidityText} %`:'— %';
   const growth=simpleGrowthState?.fermentationId===current?.id?simpleGrowthState:null;
-  $('simple-growth-fact').hidden=!(current&&growth?.factor!==null&&Number.isFinite(growth?.factor));
-  if(growth?.factor!==null&&Number.isFinite(growth?.factor))$('simple-growth').textContent=`×${growth.factor.toLocaleString('ca-ES',{minimumFractionDigits:1,maximumFractionDigits:2})}`;
-  const photo=visiblePhotoRows[simplePhotoIndex]||(!photoSession||String(lastKnownPhoto?.fermentation_id)===String(photoSession.id)?lastKnownPhoto:null),photoAge=photo?Date.now()-new Date(photo.captured_at).getTime():Infinity,photoFresh=photoAge<=Math.max(240000,Number($('camera-status').dataset.intervalSeconds||120)*2*1000);
+  $('simple-growth-fact').hidden=false;
+  $('simple-growth').textContent=current&&growth?.factor!==null&&Number.isFinite(growth?.factor)?`×${growth.factor.toLocaleString('ca-ES',{minimumFractionDigits:1,maximumFractionDigits:2})}`:'—';
+  const photo=visiblePhotoRows[simplePhotoIndex]||(!photoSession||String(lastKnownPhoto?.fermentation_id)===String(photoSession.id)?lastKnownPhoto:null);
   const image=$('simple-camera-image'),placeholder=$('simple-camera-placeholder'),stamp=$('simple-photo-time');
-  if(photo?.camera_ok&&photo.filename){const imageUrl=`/photos/${encodeURIComponent(photo.filename)}?revision=${encodeURIComponent(photo.image_revision||photo.id)}`;if(image.dataset.photoUrl!==imageUrl){image.src=imageUrl;image.dataset.photoUrl=imageUrl;}image.hidden=false;placeholder.hidden=true;stamp.hidden=false;stamp.textContent=`${photoFresh?'Darrera fotografia':'Fotografia antiga'} · ${fmtTime(photo.captured_at)}${photoFresh?'':` · ${ageText(photo.captured_at)}`}`;}
+  if(photo?.camera_ok&&photo.filename){const imageUrl=`/photos/${encodeURIComponent(photo.filename)}?revision=${encodeURIComponent(photo.image_revision||photo.id)}`;if(image.dataset.photoUrl!==imageUrl){image.src=imageUrl;image.dataset.photoUrl=imageUrl;}image.hidden=false;placeholder.hidden=true;stamp.hidden=false;stamp.textContent=`${fmtTime(photo.captured_at)} · ${ageText(photo.captured_at)}`;}
   else{image.removeAttribute('src');image.hidden=true;placeholder.hidden=false;stamp.hidden=true;$('simple-camera-message').textContent=current&&!current.camera_enabled?'Les fotografies estan desactivades per a aquesta fermentació.':lastPhotoAttempt&&!lastPhotoAttempt.camera_ok?'No hem pogut obtenir una fotografia. Comprova que la càmera està encesa i connectada.':lastMonitoringState?.active?'Esperant la primera fotografia.':'El seguiment està aturat. Revisa els Ajustos o demana ajuda per activar-lo.';}
   const recording=Boolean(lastMonitoringState?.active);
   $('simple-recording-dot').classList.toggle('is-active',recording);
@@ -487,7 +488,7 @@ function showChartTooltipTime(target,syncPhoto=false){
   const groups=['Cambra','Massa','Humitat','Creixement'],maxDeltas={Cambra:90000,Massa:180000,Humitat:90000,Creixement:180000};
   const chosen=[];
   for(const name of groups){const candidates=lastChartPoints.filter(point=>point.series===name).map(point=>({...point,delta:Math.abs(Date.parse(point.row.captured_at)-target)})).sort((a,b)=>a.delta-b.delta);const point=candidates[0];
-    if(point&&point.delta<=maxDeltas[name]){const value=Number(point.row[point.key]).toLocaleString('ca-ES',{maximumFractionDigits:2});chosen.push({name,text:`${name}: ${name==='Creixement'?'×':''}${value}${name==='Creixement'?'':' '+point.unit} · ${new Date(point.row.captured_at).toLocaleTimeString('ca-ES',{hour:'2-digit',minute:'2-digit'})}`});}
+    if(point&&point.delta<=maxDeltas[name]){const value=Number(point.row[point.key]).toLocaleString('ca-ES',{maximumFractionDigits:2});chosen.push({name,text:`${name}: ${name==='Creixement'?'×':''}${value}${name==='Creixement'?'':' '+point.unit}`});}
   }
   const photo=window.PanettoneChartState.nearest(simplePhotoRows,new Date(target).toISOString(),180000);
   if(photo&&syncPhoto){const index=simplePhotoRows.findIndex(row=>String(row.id)===String(photo.id));if(index>=0){simplePhotoIndex=index;simplePhotoFollowsLatest=index===simplePhotoRows.length-1&&target>=Date.parse(photo.captured_at);renderSimpleDashboard();}}

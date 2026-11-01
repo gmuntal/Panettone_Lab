@@ -295,3 +295,25 @@
   :root[data-ui-mode="simple"] .app-shell,
   :root[data-ui-mode="advanced"] .app-shell { padding-bottom:calc(50px + env(safe-area-inset-bottom)); }
 }
+
+/* Compact fermentation overview and photo details. */
+.simple-facts { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.climate-fact { grid-column:auto; }
+.simple-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.simple-actions #simple-start-button,
+.simple-actions #simple-finish-button,
+.simple-actions #simple-new-button { grid-column:1/-1; }
+.simple-actions #simple-note-button,
+.simple-actions #simple-detection-link { min-width:0; padding-inline:8px; font-size:11px; }
+.simple-photo-time { top:10px; bottom:auto; left:10px; }
+.chart-panel > .panel-heading { flex-wrap:nowrap; align-items:center; }
+.chart-panel > .panel-heading h2 { font-size:17px; }
+#chart-tooltip-content { flex-wrap:nowrap; gap:3px 11px; overflow-x:auto; white-space:nowrap; scrollbar-width:thin; }
+.chart-tooltip-value { flex:none; }
+@media (max-width:760px) {
+  .chart-panel > .panel-heading h2 { font-size:16px; }
+  .chart-session-select select { min-width:min(145px,42vw); }
+  .simple-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .simple-actions #simple-note-button,
+  .simple-actions #simple-detection-link { min-height:44px; font-size:10px; }
+}
