@@ -33,7 +33,7 @@ from . import push
 from . import archiving
 from . import probe
 
-APP_VERSION = "0.17.5"
+APP_VERSION = "0.17.6"
 log = logging.getLogger(__name__)
 _api_rate_lock = threading.Lock()
 _api_rate_windows = {}

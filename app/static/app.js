@@ -49,6 +49,7 @@ let foregroundRefreshTimer=null;
 const chartSeriesVisible={ambient:true,dough:true,humidity:true,growth:true};
 
 function currentUiMode(){return document.documentElement.dataset.uiMode==='advanced'?'advanced':'simple';}
+function chooseSimplePhotoAt(value){const session=chartSession()||activeFermentation,rows=!session||String(simplePhotoSessionId)===String(session.id)?simplePhotoRows:[],photo=window.PanettoneChartState.nearest(rows,new Date(Number(value)).toISOString());if(photo)simplePhotoIndex=rows.findIndex(row=>String(row.id)===String(photo.id));simplePhotoFollowsLatest=simplePhotoIndex===rows.length-1;renderSimpleDashboard();}
 function prettyFermentationKind(value){return ({lievito_madre:'Lievito madre',first_dough:'Primer impasto',final_fermentation:'Fermentació final',other:'Una altra fermentació'})[value]||value||'Fermentació';}
 function recordedFermentationKind(item){return /^Tipus de fermentació:\s*([^\r\n]+)/mi.exec(item?.notes||'')?.[1]?.trim()||null;}
 function durationBetween(start,end){const seconds=Math.max(0,Math.floor((new Date(end).getTime()-new Date(start).getTime())/1000)),days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60);return days?`${days} d ${hours} h`:`${hours} h ${minutes} min`;}
@@ -107,6 +108,7 @@ function renderSimpleDashboard(){
   slider.max=String(visiblePhotoRows.length?Date.parse(visiblePhotoRows.at(-1).captured_at):0);slider.step='1000';slider.disabled=visiblePhotoRows.length<2;
   if(simplePhotoIndex>=0&&visiblePhotoRows[simplePhotoIndex])slider.value=String(Date.parse(visiblePhotoRows[simplePhotoIndex].captured_at));
   $('simple-photo-timeline-label').textContent=photo?`${fmtTime(photo.captured_at)}${visiblePhotoRows.length?` · ${simplePhotoIndex+1}/${visiblePhotoRows.length}`:''}`:'—';
+  syncFullscreenPhotoView(photo,visiblePhotoRows,slider);
   if(finished){$('simple-finished-duration').textContent=`Durada: ${durationBetween(finished.started_at,finished.ended_at||Date.now())}`;const facts=$('simple-finished-facts');facts.replaceChildren();const entries=[];if(kind)entries.push(['Què hem fermentat',kind]);if(finished.initial_ph!==null&&finished.initial_ph!==undefined)entries.push(['pH inicial registrat',`${Number(finished.initial_ph).toFixed(2)}`]);const phEvents=(finished.events||[]).filter(event=>event.ph!==null&&event.ph!==undefined),lastPh=phEvents.at(-1);if(lastPh)entries.push(['Darrer pH registrat',`${Number(lastPh.ph).toFixed(2)}`]);if(finished.initial_dough_temp_c!==null&&finished.initial_dough_temp_c!==undefined)entries.push(['Temperatura inicial de la massa',`${Number(finished.initial_dough_temp_c).toFixed(1)} °C`]);const doughEvents=(finished.events||[]).filter(event=>event.dough_temp_c!==null&&event.dough_temp_c!==undefined),lastDough=doughEvents.at(-1);if(lastDough)entries.push(['Darrera temperatura de la massa',`${Number(lastDough.dough_temp_c).toFixed(1)} °C`]);for(const [name,value] of entries){const row=document.createElement('p');row.textContent=`${name}: ${value}`;facts.append(row);}if(!entries.length){const row=document.createElement('p');row.textContent='No hi ha més mesures registrades per mostrar.';facts.append(row);}}
 }
 
@@ -482,7 +484,7 @@ function showChartTooltipTime(target,syncPhoto=false){
   const groups=['Cambra','Massa','Humitat','Creixement'],maxDeltas={Cambra:90000,Massa:180000,Humitat:90000,Creixement:180000};
   const chosen=[];
   for(const name of groups){const candidates=lastChartPoints.filter(point=>point.series===name).map(point=>({...point,delta:Math.abs(Date.parse(point.row.captured_at)-target)})).sort((a,b)=>a.delta-b.delta);const point=candidates[0];
-    if(point&&point.delta<=maxDeltas[name]){const value=Number(point.row[point.key]).toLocaleString('ca-ES',{maximumFractionDigits:2});chosen.push({name,text:`${name}: ${name==='Creixement'?'×':''}${value}${name==='Creixement'?'':' '+point.unit}`});}
+    if(point&&point.delta<=maxDeltas[name]){const value=Number(point.row[point.key]).toLocaleString('ca-ES',{maximumFractionDigits:2}),initial={Cambra:'C',Massa:'M',Humitat:'H',Creixement:'G'}[name];chosen.push({name,text:`${initial}: ${name==='Creixement'?'×':''}${value}${name==='Creixement'?'':' '+point.unit}`});}
   }
   const photo=window.PanettoneChartState.nearest(simplePhotoRows,new Date(target).toISOString(),180000);
   if(photo&&syncPhoto){const index=simplePhotoRows.findIndex(row=>String(row.id)===String(photo.id));if(index>=0){simplePhotoIndex=index;simplePhotoFollowsLatest=index===simplePhotoRows.length-1&&target>=Date.parse(photo.captured_at);renderSimpleDashboard();}}
@@ -829,11 +831,16 @@ async function stepSimplePhoto(delta){
 }
 $('simple-photo-previous').addEventListener('click',()=>void stepSimplePhoto(-1));
 $('simple-photo-next').addEventListener('click',()=>void stepSimplePhoto(1));
-$('simple-photo-timeline').addEventListener('input',event=>{const photo=window.PanettoneChartState.nearest(simplePhotoRows,new Date(Number(event.currentTarget.value)).toISOString());if(photo)simplePhotoIndex=simplePhotoRows.findIndex(row=>String(row.id)===String(photo.id));simplePhotoFollowsLatest=simplePhotoIndex===simplePhotoRows.length-1;renderSimpleDashboard();});
-$('simple-camera-image').addEventListener('click',()=>{$('photo-fullscreen-image').src=$('simple-camera-image').src;$('photo-fullscreen-dialog').showModal();});
-$('simple-photo-expand').addEventListener('click',()=>{$('photo-fullscreen-image').src=$('simple-camera-image').src;$('photo-fullscreen-dialog').showModal();});
+$('simple-photo-timeline').addEventListener('input',event=>chooseSimplePhotoAt(event.currentTarget.value));
+function syncFullscreenPhotoView(photo,rows,slider){const dialog=$('photo-fullscreen-dialog');if(!dialog.open)return;const image=$('simple-camera-image'),fullImage=$('photo-fullscreen-image');if(photo?.camera_ok&&photo.filename&&!image.hidden)fullImage.src=image.src;const fullSlider=$('photo-fullscreen-timeline');fullSlider.min=slider.min;fullSlider.max=slider.max;fullSlider.step=slider.step;fullSlider.value=photo?String(Date.parse(photo.captured_at)):slider.value;fullSlider.disabled=slider.disabled;$('photo-fullscreen-timeline-label').textContent=$('simple-photo-timeline-label').textContent;$('photo-fullscreen-previous').disabled=!photo||rows.length<2||simplePhotoIndex<=0;$('photo-fullscreen-next').disabled=!photo||rows.length<2||simplePhotoIndex>=rows.length-1;}
+function openSimplePhotoFullscreen(){if($('simple-camera-image').hidden)return;$('photo-fullscreen-image').src=$('simple-camera-image').src;$('photo-fullscreen-dialog').showModal();renderSimpleDashboard();}
+$('simple-photo-expand').addEventListener('click',openSimplePhotoFullscreen);
 $('photo-fullscreen-close').addEventListener('click',()=>$('photo-fullscreen-dialog').close());
+$('photo-fullscreen-previous').addEventListener('click',()=>void stepSimplePhoto(-1));
+$('photo-fullscreen-next').addEventListener('click',()=>void stepSimplePhoto(1));
+$('photo-fullscreen-timeline').addEventListener('input',event=>chooseSimplePhotoAt(event.currentTarget.value));
 $('photo-fullscreen-dialog').addEventListener('click',event=>{if(event.target===$('photo-fullscreen-dialog'))$('photo-fullscreen-dialog').close();});
+for(const eventName of ['gesturestart','gesturechange'])document.addEventListener(eventName,event=>event.preventDefault(),{passive:false});
 $('end-fermentation').addEventListener('click',async()=>{if(!activeFermentation||!window.confirm('Finalitzar aquesta fermentació?'))return;try{await json(`/api/fermentations/${activeFermentation.id}/end`,{method:'POST'});await refresh();}catch(error){window.alert(error.message);}});
 $('simple-view-summary').addEventListener('click',()=>showPage('fermentations'));
 $('simple-note-button').addEventListener('click',()=>{$('simple-note-form').reset();$('simple-note-feedback').textContent='';$('simple-note-dialog').showModal();});

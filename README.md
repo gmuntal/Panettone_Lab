@@ -1,6 +1,6 @@
-# Panettone Lab v0.17.5
+# Panettone Lab v0.17.6
 
-v0.17.5 manté «Evolució» sempre visible, simplifica la llegenda a inicials i fa més compactes les targetes de temperatura, humitat, creixement i temps. Les unitats ara queden alineades amb els valors. No modifica API, SQLite, dades ni control tèrmic. [Notes v0.17.5](docs/v0.17.5.md).
+v0.17.6 posa noms complets als controls de gràfica i inicials als valors seleccionats, limita la pantalla completa a l’acció d’ampliació i hi afegeix navegació i cronologia de fotos. També compacta les targetes i la barra inferior i evita el zoom per pinça. No modifica API, SQLite, dades ni control tèrmic. [Notes v0.17.6](docs/v0.17.6.md).
 
 v0.17.4 compacta la graella principal en quatre quadres, mostra la data i antiguitat de la foto sobre la imatge, i redueix l’espai de la secció «Evolució» i dels controls d’acció. No modifica API, SQLite, dades ni control tèrmic. [Notes v0.17.4](docs/v0.17.4.md).
 
