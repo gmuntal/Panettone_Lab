@@ -140,9 +140,6 @@
 .simple-actions .secondary-button { min-height:43px; }
 .simple-detection-link { text-align:center; }
 :root[data-ui-mode="simple"] #page-home > #home-history-details { display:block !important; }
-:root[data-ui-mode="simple"] #page-home > #home-history-details > summary { min-height:46px; }
-:root[data-ui-mode="simple"] #page-home > #home-history-details[open] .home-history-content { padding-inline:0; }
-:root[data-ui-mode="simple"] #page-home > #home-history-details[open] .home-history-content > .panel { padding:18px; }
 .chart-series-toggle { min-height:38px; display:inline-flex; align-items:center; gap:7px; padding:5px 8px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--text-secondary); font:600 11px inherit; cursor:pointer; }
 .chart-series-toggle[aria-pressed="true"] { border-color:var(--line); background:var(--surface-raised); color:var(--ink); }
 .chart-series-toggle.is-muted { opacity:.5; text-decoration:line-through; }
@@ -220,7 +217,7 @@
   .chart-wrap canvas { height:193px; }
   .chart-tooltip { left:0;right:0;bottom:0;transform:none;width:100%;max-width:none;justify-content:space-between;border-radius:8px;font-size:9px;padding:5px 7px; }
   .simple-status-warning { grid-column:1;grid-row:auto; }
-  :root[data-ui-mode="simple"] #page-home > #home-history-details[open] .home-history-content > .panel { padding:13px 8px; }
+  :root[data-ui-mode="simple"] #page-home > #home-history-details .home-history-content > .panel { padding:13px 8px; }
 }
 
 @media (max-width: 760px) {
@@ -276,6 +273,14 @@
 .chart-series-toggle i { width:8px; height:8px; }
 .chart-filters { flex:none; }
 .chart-session-select select { max-width:min(46vw,240px); min-width:150px; }
+.simple-facts { gap:7px; }
+.simple-fact { min-height:70px; gap:4px; padding:9px 12px; }
+.simple-fact > span,.climate-main>span,.climate-humidity>span { font-size:10px; }
+.simple-fact > strong { font-size:clamp(21px,2.3vw,27px); }
+.climate-fact { min-height:70px; gap:8px; }
+.climate-main>strong { font-size:clamp(18px,2.1vw,25px); white-space:nowrap; }
+.climate-humidity { min-width:70px; gap:3px; padding-left:9px; }
+.climate-humidity>strong { font-size:16px; white-space:nowrap; }
 .nav-item .nav-icon { display:grid; place-items:center; width:22px; height:22px; color:inherit; }
 .nav-item .nav-icon svg { display:block; width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 @media (max-width:760px) {
@@ -310,10 +315,19 @@
 .chart-panel > .panel-heading h2 { font-size:17px; }
 #chart-tooltip-content { flex-wrap:nowrap; gap:3px 11px; overflow-x:auto; white-space:nowrap; scrollbar-width:thin; }
 .chart-tooltip-value { flex:none; }
+.climate-main > strong,.climate-humidity > strong,#simple-dough-fact > strong { display:flex; align-items:baseline; gap:3px; white-space:nowrap; }
+.climate-humidity > strong { justify-content:flex-end; }
+.climate-main > strong small,.climate-humidity > strong small,#simple-dough-fact > strong small { color:var(--text-secondary); font-size:.52em; font-weight:600; }
 @media (max-width:760px) {
   .chart-panel > .panel-heading h2 { font-size:16px; }
   .chart-session-select select { min-width:min(145px,42vw); }
   .simple-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
   .simple-actions #simple-note-button,
   .simple-actions #simple-detection-link { min-height:44px; font-size:10px; }
+  .simple-fact { min-height:70px; padding:9px 10px; }
+  .simple-fact > strong { font-size:clamp(19px,5vw,23px); }
+  .climate-fact { min-height:70px; }
+  .climate-main > strong { font-size:clamp(18px,5vw,22px); }
+  .climate-humidity { min-width:64px; padding-left:8px; }
+  .climate-humidity > strong { font-size:15px; }
 }

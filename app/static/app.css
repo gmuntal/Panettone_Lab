@@ -234,19 +234,11 @@ html{min-height:100%}body{min-height:100vh;min-height:100dvh}
 /* Keep dashboard mobile overrides after the legacy probe layout rules above. */
 @media(max-width:760px){.metrics{grid-template-columns:minmax(0,1fr);gap:8px}.metrics .status-card{grid-column:auto}}
 
-/* Home overview: keep the live status prominent and the long-term history on demand. */
+/* Home overview: keep the live status and fermentation evolution visible together. */
 .dashboard-status{border:0;background:transparent;padding:0;margin:-12px 0 14px;box-shadow:none}
-.home-history{margin-top:14px;border:1px solid var(--line);border-radius:14px;background:#fff;overflow:hidden}
-.home-history>summary{min-height:60px;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:none}
-.home-history>summary::-webkit-details-marker{display:none}
-.home-history>summary>span:first-child{display:grid;gap:4px}
-.home-history>summary strong{font-size:12px;color:var(--green)}
-.home-history>summary small{font-size:10px;color:var(--muted)}
-.home-history-action{font-size:10px;font-weight:700;color:var(--green)}
-.home-history[open] .home-history-action{font-size:0}
-.home-history[open] .home-history-action:after{content:'Amaga';font-size:10px}
-.home-history-content{padding:0 12px 1px;border-top:1px solid var(--line)}
-.home-history-content>.panel{border:0;box-shadow:none;margin:12px 0;padding:15px 12px}
+.home-history{margin-top:8px;border:0;border-radius:0;background:transparent;overflow:visible}
+.home-history-content{padding:0;border:0}
+.home-history-content>.panel{border:0;box-shadow:none;margin:8px 0;padding:14px 12px}
 .home-history-content>.panel+.panel{border-top:1px solid var(--line);border-radius:0}
 @media(max-width:760px){
   .dashboard-status{margin:0 0 10px}
@@ -256,9 +248,7 @@ html{min-height:100%}body{min-height:100vh;min-height:100dvh}
   .metric-value{font-size:26px;margin-top:5px}
   .metric-foot{font-size:9px;line-height:1.35}
   .camera-status{font-size:13px;margin-top:9px}
-  .home-history>summary{min-height:56px;padding:10px 12px}
-  .home-history-content{padding:0 5px 1px}
-  .home-history-content>.panel{padding:13px 8px;margin:8px 0}
+  .home-history-content>.panel{padding:11px 8px;margin:6px 0}
 }
 @media(max-width:360px){.metrics{grid-template-columns:minmax(0,1fr)}.metric-card,.metric-card.status-card{min-height:0}}
 

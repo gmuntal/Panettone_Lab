@@ -45,7 +45,7 @@ let vesselCalibration=null,finalPinned=false,playbackEndId=null,currentImageRead
 let manualSurfaceDraft=null,manualSurfaceDragging=false,wizardCameraReturn=false;
 let simplePhotoRows=[],simplePhotoIndex=-1,lastChartPoints=[],chartGrowthRows=[],chartSessionDomain=null;
 let simplePhotoFollowsLatest=true,simplePhotoRefreshPromise=null,simplePhotoSessionId=null,chartSessionId='active',chartTooltipPinned=false,chartKeyboardTime=null,lastChartDomain=[0,1],chartCursorTime=null,chartRefreshSequence=0;
-let autoOpenedChartSessionId=null,foregroundRefreshTimer=null;
+let foregroundRefreshTimer=null;
 const chartSeriesVisible={ambient:true,dough:true,humidity:true,growth:true};
 
 function currentUiMode(){return document.documentElement.dataset.uiMode==='advanced'?'advanced':'simple';}
@@ -73,14 +73,14 @@ function renderSimpleDashboard(){
   $('simple-elapsed').textContent=current?elapsedSince(current.started_at):'—';
   const sensorFresh=$('sensor-freshness').classList.contains('fresh');
   const tempText=$('temperature').textContent.replace('°C','').trim();
-  $('simple-ambient-temperature').textContent=sensorFresh&&tempText!=='—'?`${tempText} °C`:'— °C';
+  $('simple-ambient-temperature').textContent=sensorFresh&&tempText!=='—'?tempText:'—';
   const probeValue=$('dough-temperature').textContent.replace('°C','').trim();
   const probeFresh=lastKnownProbeReading&&Date.now()-new Date(lastKnownProbeReading.captured_at).getTime()<=120000;
   $('simple-dough-fact').hidden=false;
-  $('simple-dough-temperature').textContent=probeFresh&&probeValue!=='—'?`${probeValue} °C`:'—';
+  $('simple-dough-temperature').textContent=probeFresh&&probeValue!=='—'?probeValue:'—';
   const humidityText=$('humidity').textContent.replace('%','').trim();
   $('simple-humidity-fact').hidden=false;
-  $('simple-humidity').textContent=sensorFresh&&humidityText!=='—'?`${humidityText} %`:'— %';
+  $('simple-humidity').textContent=sensorFresh&&humidityText!=='—'?humidityText:'—';
   const growth=simpleGrowthState?.fermentationId===current?.id?simpleGrowthState:null;
   $('simple-growth-fact').hidden=false;
   $('simple-growth').textContent=current&&growth?.factor!==null&&Number.isFinite(growth?.factor)?`×${growth.factor.toLocaleString('ca-ES',{minimumFractionDigits:1,maximumFractionDigits:2})}`:'—';
@@ -189,9 +189,6 @@ async function refreshUnifiedChart(){
   drawChart(chartAmbientRows);
   if(lastChartPoints.length)showChartTooltipTime(Math.max(...lastChartPoints.map(point=>Date.parse(point.row.captured_at))));
   else $('chart-tooltip-content').textContent='Encara no hi ha dades per a aquesta fermentació.';
-  if(currentUiMode()==='simple'&&activeFermentation&&String(chartSession()?.id)===String(activeFermentation.id)&&autoOpenedChartSessionId!==String(activeFermentation.id)){
-    const history=$('home-history-details');if(history){history.open=true;autoOpenedChartSessionId=String(activeFermentation.id);requestAnimationFrame(()=>{drawChart(chartAmbientRows);if(lastChartPoints.length)showChartTooltipTime(Math.max(...lastChartPoints.map(point=>Date.parse(point.row.captured_at))));});}
-  }
 }
 
 const eventLabels={refresh:'Refresc',ph_measurement:'Mesura de pH',dough_temperature:'Temperatura de la massa',
@@ -384,9 +381,6 @@ if(document.addEventListener)document.addEventListener('click',async event=>{
   }finally{link.removeAttribute('aria-busy');exportInProgress=false;}
 });
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>showPage(button.dataset.view)));
-document.getElementById('home-history-details')?.addEventListener('toggle',event=>{
-  if(event.currentTarget.open) requestAnimationFrame(()=>{drawChart(chartAmbientRows);if(lastChartPoints.length&&chartCursorTime===null)showChartTooltipTime(Math.max(...lastChartPoints.map(point=>Date.parse(point.row.captured_at))));});
-});
 document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>{
   showPage(button.dataset.go);
   const target=button.dataset.open?document.getElementById(button.dataset.open):null;
