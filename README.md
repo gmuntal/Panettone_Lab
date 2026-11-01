@@ -1,4 +1,6 @@
-# Panettone Lab v0.17.6
+# Panettone Lab v0.17.7
+
+v0.17.7 posa la creu de tancament petita a dalt a la dreta de la foto ampliada, manté els botons per canviar de foto a baix a la dreta amb el mateix estil que la vista normal, deixa només el dia i l’hora a la llegenda de la gràfica i simplifica el peu de pàgina. No modifica API, dades, SQLite ni control tèrmic. [Notes v0.17.7](docs/v0.17.7.md).
 
 v0.17.6 posa noms complets als controls de gràfica i inicials als valors seleccionats, limita la pantalla completa a l’acció d’ampliació i hi afegeix navegació i cronologia de fotos. També compacta les targetes i la barra inferior i evita el zoom per pinça. No modifica API, SQLite, dades ni control tèrmic. [Notes v0.17.6](docs/v0.17.6.md).
 

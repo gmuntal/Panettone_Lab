@@ -83,6 +83,19 @@ class CameraUiAssetTests(unittest.TestCase):
         self.assertIn('data-chart-series="growth"', html)
         self.assertIn("window.addEventListener('pageshow',refreshOnForeground)", javascript)
         self.assertIn("document.addEventListener('visibilitychange'", javascript)
+
+    def test_fullscreen_photo_controls_and_chart_photo_caption_are_compact(self):
+        html = (ROOT / "app/templates/dashboard.html").read_text()
+        css = (ROOT / "app/static/simple-mode.css").read_text()
+        javascript = (ROOT / "app/static/app.js").read_text()
+        self.assertIn('class="photo-fullscreen-close"', html)
+        self.assertIn('class="simple-photo-controls"><button type="button" id="photo-fullscreen-previous"', html)
+        self.assertIn('.photo-fullscreen-close { position:absolute;', css)
+        self.assertIn('.photo-fullscreen-stage .simple-photo-controls { right:10px; bottom:10px; }', css)
+        self.assertIn('photoTime.textContent=fmtTime(photo.captured_at)', javascript)
+        self.assertNotIn('Foto més propera ${fmtTime(photo.captured_at)}', javascript)
+        footer = html[html.index('<footer>'):html.index('</footer>')]
+        self.assertNotIn('by gmuntal', footer)
         self.assertIn('fermentation_id=${encodeURIComponent(session.id)}', javascript)
         self.assertIn("simplePhotoRows[simplePhotoIndex]", javascript)
 

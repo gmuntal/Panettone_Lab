@@ -166,7 +166,6 @@
 .photo-fullscreen-dialog { width:100vw; height:100dvh; max-width:none; max-height:none; padding:50px 12px 12px; border:0; background:#050706; color:white; }
 .photo-fullscreen-dialog::backdrop { background:#000; }
 .photo-fullscreen-dialog img { width:100%; height:100%; object-fit:contain; }
-.photo-fullscreen-dialog button { position:absolute; z-index:2; top:max(12px,env(safe-area-inset-top)); right:14px; min-height:44px; padding:0 15px; border:1px solid #ffffff80; border-radius:999px; background:#151a18; color:#fff; font:600 13px inherit; }
 :root[data-ui-mode="simple"] #page-camera .camera-playback-panel { display:none; }
 :root[data-ui-mode="simple"] #page-camera .camera-comparison-panel > .panel-heading > #use-fermentation-start { display:none; }
 :root[data-ui-mode="simple"] #page-camera .growth-panel #baseline-button { display:none; }
@@ -336,12 +335,13 @@
 /* v0.17.6: named chart controls, compact stats/dock, and usable fullscreen photo timeline. */
 .chart-series-toggle { gap:5px; font-size:10px; }
 .photo-fullscreen-dialog { position:fixed; inset:0; width:100vw; height:100dvh; max-width:none; max-height:none; margin:0; padding:max(8px,env(safe-area-inset-top)) 10px max(4px,env(safe-area-inset-bottom)); border:0; background:#050706; color:white; }
-.photo-fullscreen-dialog[open] { display:grid; grid-template-rows:minmax(0,1fr) auto auto; gap:7px; }
-.photo-fullscreen-dialog img { grid-row:1; width:100%; height:100%; min-height:0; object-fit:contain; }
-.photo-fullscreen-nav { display:grid; grid-template-columns:48px minmax(90px,1fr) 48px; align-items:center; gap:10px; }
-.photo-fullscreen-nav button { position:static; min-width:44px; min-height:44px; padding:0 12px; border:1px solid #ffffff70; border-radius:10px; background:#151a18; color:#fff; font:600 14px inherit; }
-.photo-fullscreen-nav button:first-child,.photo-fullscreen-nav button:last-child { font-size:28px; }
-.photo-fullscreen-nav button:disabled { opacity:.4; }
+.photo-fullscreen-dialog[open] { display:grid; grid-template-rows:minmax(0,1fr) auto; gap:7px; }
+.photo-fullscreen-close { position:absolute; top:max(8px,env(safe-area-inset-top)); right:10px; z-index:3; display:grid; place-items:center; width:36px; height:36px; min-height:36px; padding:0; border:1px solid #ffffff70; border-radius:50%; background:#151a18e8; color:#fff; font:400 26px/1 inherit; cursor:pointer; }
+.photo-fullscreen-stage { position:relative; display:grid; place-items:center; min-height:0; }
+.photo-fullscreen-stage img { display:block; width:100%; height:100%; min-height:0; object-fit:contain; }
+.photo-fullscreen-stage .simple-photo-controls { right:10px; bottom:10px; }
+.photo-fullscreen-stage .simple-photo-controls button { width:44px; height:44px; }
+.photo-fullscreen-stage .simple-photo-controls button:disabled { opacity:.4; }
 .photo-fullscreen-timeline { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:10px; padding:0 2px; color:#fff; font-size:11px; font-variant-numeric:tabular-nums; }
 .photo-fullscreen-timeline input { width:100%; min-width:0; min-height:32px; accent-color:#f4b83f; }
 .simple-fact { min-height:62px; padding:7px 10px; }

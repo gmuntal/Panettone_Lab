@@ -493,7 +493,7 @@ function showChartTooltipTime(target,syncPhoto=false){
   const time=document.createElement('strong');time.className='chart-tooltip-time';time.textContent=elapsed;content.append(time);
   for(const item of chosen){const value=document.createElement('span');value.className=`chart-tooltip-value chart-tooltip-${item.name.toLowerCase()}`;value.textContent=item.text;content.append(value);}
   if(!chosen.length){const empty=document.createElement('span');empty.textContent='No hi ha mostres a prop d’aquest instant.';content.append(empty);}
-  if(photo){const photoTime=document.createElement('span');photoTime.className='chart-tooltip-photo';photoTime.textContent=`Foto més propera ${fmtTime(photo.captured_at)}`;content.append(photoTime);}
+  if(photo){const photoTime=document.createElement('span');photoTime.className='chart-tooltip-photo';photoTime.textContent=fmtTime(photo.captured_at);content.append(photoTime);}
   $('chart-tooltip').hidden=false;
   drawChart(chartAmbientRows);
 }
